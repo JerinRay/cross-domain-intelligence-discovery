@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 import pandas as pd
@@ -6,8 +7,9 @@ import pyarrow as pa
 
 import json
 import logging
-def detect_file_type(file_path: str) -> str:
 
+
+def detect_file_type(file_path: str) -> str:
     path = Path(file_path)
 
     if not path.exists():
@@ -27,8 +29,63 @@ def detect_file_type(file_path: str) -> str:
         raise ValueError(f"Unsupported file format: {extension}")
 
     return supported_formats[extension]
+
+
+def load_file(file_path: str):
+    file_type = detect_file_type(file_path)
+
+    if file_type == "csv":
+        return pd.read_csv(file_path)
+
+    elif file_type == "excel":
+        return pd.read_excel(file_path)
+
+    elif file_type == "json":
+        return pd.read_json(file_path)
+
+    elif file_type == "parquet":
+        return pd.read_parquet(file_path)
+
+
+def save_processed_file(data, output_path: str):
+    output_file = Path(output_path)
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    data.to_parquet(output_file, index=False)
+
+    print(f"Processed dataset saved: {output_file}")
+
+
 if __name__ == "__main__":
-    print(detect_file_type("datasets/raw/customers.csv"))
-    if __name__ == "__main__":
-        print(detect_file_type("datasets/raw/customers.csv"))
-        
+
+    file_path = "datasets/raw/customers.csv"
+
+    print("Detected file type:", detect_file_type(file_path))
+
+    data = load_file(file_path)
+
+    print("\nLoaded Dataset:")
+    print(data)
+
+    print("\nDataset Shape:", data.shape)
+
+    print("\nColumn Names:")
+    print(data.columns.tolist())
+
+    print("\nMissing Values:")
+    print(data.isnull().sum())
+
+    save_processed_file(
+        data,
+        "datasets/processed/customers.parquet"
+    )
+
+    saved_data = pd.read_parquet(
+        "datasets/processed/customers.parquet"
+    )
+
+    print("\nVerified Parquet Dataset:")
+    print(saved_data)
+
+    print("\nParquet Shape:", saved_data.shape)
