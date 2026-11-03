@@ -2,18 +2,52 @@
 from pathlib import Path
 
 import pandas as pd
-import polars as pl
-import pyarrow as pa
 
-import json
-import logging
+
+def discover_files(directory: str):
+    """
+    Automatically discover supported dataset files
+    inside a directory and its subdirectories.
+    """
+    raw_directory = Path(directory)
+
+    if not raw_directory.exists():
+        raise FileNotFoundError(
+            f"Directory not found: {directory}"
+        )
+
+    if not raw_directory.is_dir():
+        raise NotADirectoryError(
+            f"Not a directory: {directory}"
+        )
+
+    supported_extensions = {
+        ".csv",
+        ".xlsx",
+        ".xls",
+        ".json",
+        ".parquet"
+    }
+
+    discovered_files = []
+
+    for file_path in raw_directory.rglob("*"):
+        if (
+            file_path.is_file()
+            and file_path.suffix.lower() in supported_extensions
+        ):
+            discovered_files.append(file_path)
+
+    return sorted(discovered_files)
 
 
 def detect_file_type(file_path: str) -> str:
     path = Path(file_path)
 
     if not path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
+        raise FileNotFoundError(
+            f"File not found: {file_path}"
+        )
 
     extension = path.suffix.lower()
 
@@ -26,7 +60,9 @@ def detect_file_type(file_path: str) -> str:
     }
 
     if extension not in supported_formats:
-        raise ValueError(f"Unsupported file format: {extension}")
+        raise ValueError(
+            f"Unsupported file format: {extension}"
+        )
 
     return supported_formats[extension]
 
@@ -50,14 +86,35 @@ def load_file(file_path: str):
 def save_processed_file(data, output_path: str):
     output_file = Path(output_path)
 
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    data.to_parquet(output_file, index=False)
+    data.to_parquet(
+        output_file,
+        index=False
+    )
 
     print(f"Processed dataset saved: {output_file}")
 
 
 if __name__ == "__main__":
+
+    raw_directory = "datasets/raw"
+
+    print("Discovering datasets...\n")
+
+    discovered_files = discover_files(raw_directory)
+
+    if not discovered_files:
+        print("No supported datasets found.")
+
+    else:
+        for file_path in discovered_files:
+            print("Discovered:", file_path)
+
+    print("\nTesting dataset loading...\n")
 
     file_path = "datasets/raw/customers.csv"
 
