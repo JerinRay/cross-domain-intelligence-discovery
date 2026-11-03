@@ -10,83 +10,76 @@ from src.ingestion.metadata_extractor import (
 )
 
 
-def discover_files(directory: str):
-    """Discover all supported dataset files."""
+SUPPORTED_FORMATS = {
+    ".csv",
+    ".xlsx",
+    ".xls",
+    ".json",
+    ".parquet"
+}
 
-    raw_directory = Path(directory)
 
-    if not raw_directory.exists():
+def discover_files(directory="datasets/raw"):
+    """Recursively discover supported dataset files."""
+
+    root = Path(directory)
+
+    if not root.exists():
         raise FileNotFoundError(
-            f"Directory not found: {directory}"
+            f"Dataset directory not found: {root}"
         )
 
-    if not raw_directory.is_dir():
-        raise NotADirectoryError(
-            f"Not a directory: {directory}"
-        )
-
-    supported_extensions = {
-        ".csv", ".xlsx", ".xls", ".json", ".parquet"
-    }
-
-    return sorted(
-        file_path
-        for file_path in raw_directory.rglob("*")
-        if file_path.is_file()
-        and file_path.suffix.lower() in supported_extensions
+    files = sorted(
+        file for file in root.rglob("*")
+        if file.is_file() and file.suffix.lower() in SUPPORTED_FORMATS
     )
 
+    return files
 
-def detect_file_type(file_path: str):
-    """Identify the dataset format."""
+
+def detect_file_type(file_path):
+    """Detect dataset format."""
 
     extension = Path(file_path).suffix.lower()
 
-    formats = {
-        ".csv": "csv",
-        ".xlsx": "excel",
-        ".xls": "excel",
-        ".json": "json",
-        ".parquet": "parquet"
-    }
-
-    if extension not in formats:
+    if extension not in SUPPORTED_FORMATS:
         raise ValueError(
             f"Unsupported file format: {extension}"
         )
 
-    return formats[extension]
+    return extension
 
 
-def load_file(file_path: str):
-    """Load a dataset based on its format."""
+def load_file(file_path):
+    """Load a dataset based on its file extension."""
 
+    file_path = Path(file_path)
     file_type = detect_file_type(file_path)
 
-    if file_type == "csv":
+    if file_type == ".csv":
         return pd.read_csv(file_path)
 
-    if file_type == "excel":
+    if file_type in {".xlsx", ".xls"}:
         return pd.read_excel(file_path)
 
-    if file_type == "json":
+    if file_type == ".json":
         return pd.read_json(file_path)
 
-    if file_type == "parquet":
+    if file_type == ".parquet":
         return pd.read_parquet(file_path)
 
-    raise ValueError(f"Unsupported file type: {file_type}")
+    raise ValueError(f"Cannot load file: {file_path}")
 
 
-def save_processed_file(data, output_path: str):
-    """Save dataset in Parquet format."""
+def save_processed_file(data, output_path):
+    """Save processed dataset in Parquet format."""
 
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    data.to_parquet(output_file, index=False)
+    data.to_parquet(output_path, index=False)
 
-    return output_file
+    return output_path
 
 
 def run_ingestion_pipeline(
@@ -94,7 +87,10 @@ def run_ingestion_pipeline(
     processed_directory="datasets/processed",
     report_directory="logs"
 ):
-    """Execute the complete dataset ingestion pipeline."""
+    """Run complete dataset ingestion pipeline."""
+
+    raw_root = Path(raw_directory)
+    processed_root = Path(processed_directory)
 
     files = discover_files(raw_directory)
 
@@ -104,65 +100,66 @@ def run_ingestion_pipeline(
 
     for file_path in files:
 
-        print(f"\nProcessing: {file_path.name}")
+        relative_path = file_path.relative_to(raw_root)
+        dataset_name = relative_path.with_suffix("").as_posix().replace("/", "__")
+
+        print(f"\nProcessing: {relative_path}")
 
         try:
             # 1. Load dataset
-            data = load_file(str(file_path))
+            data = load_file(file_path)
 
             # 2. Extract metadata
-            metadata = extract_metadata(
-                data,
-                file_path.stem
-            )
+            metadata = extract_metadata(data, dataset_name)
 
             # 3. Validate dataset
             validation = validate_dataset(metadata)
 
             # 4. Save processed dataset
             output_path = (
-                Path(processed_directory)
-                / f"{file_path.stem}.parquet"
+                processed_root /
+                relative_path.with_suffix(".parquet")
             )
 
             save_processed_file(data, output_path)
 
-            # 5. Generate ingestion report
+            # 5. Generate report
             generate_ingestion_report(
                 metadata,
                 validation,
                 report_directory
             )
 
-            result = {
-                "dataset": file_path.name,
-                "status": "success",
-                "valid": validation["is_valid"],
-                "rows": metadata["row_count"],
-                "columns": metadata["column_count"],
-                "issues": validation["issues"]
-            }
+            status = "SUCCESS"
 
-            print("Status: SUCCESS")
-            print("Valid:", validation["is_valid"])
+            print(f"Status: {status}")
+            print(f"Quality: {validation['quality_status']}")
+            print(f"Valid: {validation['is_valid']}")
+            print(f"Errors: {len(validation['errors'])}")
+            print(f"Warnings: {len(validation['warnings'])}")
+            print(f"Saved: {output_path}")
+
+            results.append({
+                "dataset": dataset_name,
+                "status": status,
+                "quality_status": validation["quality_status"]
+            })
 
         except Exception as error:
 
-            result = {
-                "dataset": file_path.name,
-                "status": "failed",
-                "error": str(error)
-            }
-
             print("Status: FAILED")
-            print("Error:", error)
+            print(f"Error: {error}")
 
-        results.append(result)
+            results.append({
+                "dataset": dataset_name,
+                "status": "FAILED",
+                "error": str(error)
+            })
 
-    # 6. Final summary
+    # Final summary
     successful = sum(
-        item["status"] == "success"
-        for item in results
+        result["status"] == "SUCCESS"
+        for result in results
     )
 
     failed = len(results) - successful
@@ -171,13 +168,12 @@ def run_ingestion_pipeline(
     print("INGESTION PIPELINE SUMMARY")
     print("=" * 50)
 
-    print("Total datasets:", len(results))
-    print("Successful:", successful)
-    print("Failed:", failed)
+    print(f"Total datasets: {len(results)}")
+    print(f"Successful: {successful}")
+    print(f"Failed: {failed}")
 
     return results
 
 
 if __name__ == "__main__":
-
     run_ingestion_pipeline()

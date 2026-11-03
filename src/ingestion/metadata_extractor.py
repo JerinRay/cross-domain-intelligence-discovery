@@ -6,9 +6,9 @@ import pandas as pd
 
 
 def extract_metadata(data: pd.DataFrame, dataset_name: str):
-    """Extract structural and statistical metadata."""
+    """Extract structural metadata from a dataset."""
 
-    metadata = {
+    return {
         "dataset_name": dataset_name,
         "row_count": int(data.shape[0]),
         "column_count": int(data.shape[1]),
@@ -27,43 +27,70 @@ def extract_metadata(data: pd.DataFrame, dataset_name: str):
         )
     }
 
-    return metadata
-
 
 def validate_dataset(metadata: dict):
-    """Perform basic data quality validation."""
+    """Classify data quality findings."""
 
-    issues = []
+    errors = []
+    warnings = []
+    info = []
 
+    # Structural checks
     if metadata["row_count"] == 0:
-        issues.append("Dataset is empty.")
+        errors.append("Dataset is empty.")
 
     if metadata["column_count"] == 0:
-        issues.append("Dataset has no columns.")
+        errors.append("Dataset has no columns.")
 
-    if metadata["duplicate_rows"] > 0:
-        issues.append(
-            f'{metadata["duplicate_rows"]} duplicate rows found.'
+    # Duplicate checks
+    duplicate_count = metadata["duplicate_rows"]
+
+    if duplicate_count > 0:
+        warnings.append(
+            f"{duplicate_count} duplicate rows detected."
         )
 
-    for column, count in metadata["missing_values"].items():
+    # Missing-value checks
+    missing_values = metadata["missing_values"]
+    total_missing = sum(missing_values.values())
+
+    for column, count in missing_values.items():
         if count > 0:
-            issues.append(
+            warnings.append(
                 f"{column} contains {count} missing values."
             )
 
+    # Dataset information
+    info.append(
+        f"Dataset contains {metadata['row_count']} rows "
+        f"and {metadata['column_count']} columns."
+    )
+
+    info.append(f"Total missing values: {total_missing}")
+
+    # Final status
+    if errors:
+        quality_status = "INVALID"
+    elif warnings:
+        quality_status = "WARNING"
+    else:
+        quality_status = "CLEAN"
+
     return {
-        "is_valid": len(issues) == 0,
-        "issues": issues
+        "is_valid": len(errors) == 0,
+        "quality_status": quality_status,
+        "errors": errors,
+        "warnings": warnings,
+        "info": info
     }
 
 
 def generate_ingestion_report(
-    metadata: dict,
-    validation: dict,
-    output_directory: str = "logs"
+    metadata,
+    validation,
+    output_directory="logs"
 ):
-    """Save metadata and validation results as JSON."""
+    """Generate JSON ingestion report."""
 
     report_directory = Path(output_directory)
     report_directory.mkdir(parents=True, exist_ok=True)
