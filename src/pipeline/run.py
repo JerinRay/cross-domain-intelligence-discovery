@@ -275,7 +275,27 @@ def main():
 
         builder = loader.load_data(
             orders_path=orders_path,
-            customers_path=customers_path
+            customers_path=customers_path,
+            order_items_path=(
+                "datasets/processed/olist/"
+                "olist_order_items_dataset.parquet"
+            ),
+            products_path=(
+                "datasets/processed/olist/"
+                "olist_products_dataset.parquet"
+            ),
+            sellers_path=(
+                "datasets/processed/olist/"
+                "olist_sellers_dataset.parquet"
+            ),
+            payments_path=(
+                "datasets/processed/olist/"
+                "olist_order_payments_dataset.parquet"
+            ),
+            reviews_path=(
+                "datasets/processed/olist/"
+                "olist_order_reviews_dataset.parquet"
+            )
         )
 
         validator = KnowledgeGraphValidator()
