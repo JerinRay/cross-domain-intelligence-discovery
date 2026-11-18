@@ -31,3 +31,9 @@ logs/
 
 datasets/raw/
 datasets/processed/
+
+# Logs
+logs/
+*.log
+
+datasets/processed/%

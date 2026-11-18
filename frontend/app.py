@@ -2,6 +2,8 @@ from pathlib import Path
 from datetime import datetime
 import json
 import math
+import re
+import sqlite3
 import sys
 
 import pandas as pd
@@ -614,6 +616,74 @@ def first_key(source, *keys):
     return None
 
 
+def prepare_fts_query(value):
+    """Build a safe FTS5 prefix query from ordinary user-entered text."""
+    tokens = re.findall(r"[A-Za-z0-9_]+", str(value or "").lower())
+    if not tokens:
+        return ""
+    return " AND ".join(f'"{token}"*' for token in tokens[:12])
+
+
+def search_graph_index(query, table, limit=25):
+    """Search the local SQLite FTS5 graph index without loading the full graph."""
+    fts_query = prepare_fts_query(query)
+    if not fts_query:
+        return []
+
+    database_path = LOG / "knowledge_graph_search.sqlite"
+    if not database_path.exists():
+        return []
+
+    allowed_tables = {
+        "entities_fts": "entity_id, entity_type, searchable",
+        "relationships_fts": "source_id, target_id, relationship_type, searchable",
+    }
+    if table not in allowed_tables:
+        return []
+
+    columns = allowed_tables[table]
+    try:
+        connection = sqlite3.connect(
+            f"file:{database_path.resolve()}?mode=ro", uri=True, timeout=5
+        )
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = connection.execute(
+                f"SELECT {columns} FROM {table} "
+                f"WHERE {table} MATCH ? ORDER BY rank LIMIT ?",
+                (fts_query, min(max(int(limit), 1), 100)),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            connection.close()
+    except (sqlite3.Error, OSError, ValueError):
+        return []
+
+
+def search_pipeline_stages(query, pipeline_stages):
+    """Find stages whose names, status, errors or result details match the query."""
+    term = str(query or "").strip().lower()
+    matches = []
+    if not term or not isinstance(pipeline_stages, dict):
+        return matches
+
+    for stage_name, stage_info in pipeline_stages.items():
+        stage_info = stage_info if isinstance(stage_info, dict) else {}
+        searchable_text = " ".join([
+            str(stage_name),
+            str(stage_info.get("status", "")),
+            str(stage_info.get("error", "")),
+            json.dumps(stage_info.get("result", {}), ensure_ascii=False, default=str),
+        ]).lower()
+        if term in searchable_text:
+            matches.append({
+                "Pipeline Stage": str(stage_name).replace("_", " ").title(),
+                "Status": stage_info.get("status", "UNKNOWN"),
+                "Details": str(stage_info.get("error") or "Stage details matched your search")[:240],
+            })
+    return matches
+
+
 def make_schema_graph(entity_counts, height=480):
     """Neural-network view of the knowledge graph.
 
@@ -948,21 +1018,144 @@ with nav_col:
             '<div class="version">v1.0.0 &nbsp;&nbsp;|&nbsp;&nbsp; Day 13</div>'
         )
 
+
+    
 with main_col:
+    search_col, bell_col, profile_col = st.columns([6, 0.5, 2])
+
+    with search_col:
+        global_search = st.text_input(
+            "Global Search",
+            placeholder="Search datasets, entities, relations, pipelines...",
+            label_visibility="collapsed",
+            key="global_search"
+        )
+
+    with bell_col:
+        st.markdown("<div class='bell'>🔔</div>", unsafe_allow_html=True)
+
+    with profile_col:
+        html(
+            '<div class="profile"><div class="avatar">JR</div>'
+            '<div><div class="p-name">Jerin Ray</div>'
+            '<div class="p-role">AI &amp; DS Engineer</div></div>'
+            '<span style="color:#d8d4ca">⌄</span></div>'
+        )
+
     html(
-        '<div class="topbar">'
-        '<div class="search">⌕ &nbsp;Search datasets, entities, relations, pipelines... <kbd>⌘K</kbd></div>'
-        '<div class="bell">🔔︎</div>'
-        '<div class="profile"><div class="avatar">JR</div>'
-        '<div><div class="p-name">Jerin Ray</div><div class="p-role">AI &amp; DS Engineer</div></div>'
-        '<span style="color:#d8d4ca">⌄</span></div></div>'
         '<div class="hero-title">Cross-Domain <em>Intelligence</em></div>'
         '<div class="hero-sub">Autonomous Data Discovery<b>•</b>Knowledge Graph<b>•</b>'
         'Anomaly Intelligence<b>•</b>Cross-Domain Analysis</div>'
     )
 
-    # ======================= DASHBOARD =====================
-    if page == "Dashboard":
+    
+    # ================= GLOBAL SEARCH =================
+    search_term = str(global_search or "").strip()
+
+    if search_term:
+        st.markdown("### 🔎 Global Search Results")
+        st.caption(
+            "Searching processed datasets, indexed knowledge-graph entities, "
+            "relationships and pipeline stages."
+        )
+
+        # 1. Dataset metadata search
+        st.markdown("#### 📁 Datasets")
+        if not data.empty:
+            dataset_mask = data.astype(str).apply(
+                lambda column: column.str.contains(
+                    search_term, case=False, na=False, regex=False
+                )
+            ).any(axis=1)
+            dataset_results = data.loc[dataset_mask]
+        else:
+            dataset_results = pd.DataFrame()
+
+        if not dataset_results.empty:
+            st.success(f"{len(dataset_results)} dataset match(es)")
+            display_columns = [
+                column for column in ["Dataset", "Rows", "Columns", "Size (MB)"]
+                if column in dataset_results.columns
+            ]
+            st.dataframe(
+                dataset_results[display_columns],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No dataset metadata matched this search.")
+
+        # 2. Knowledge-graph entity search (SQLite FTS5 index)
+        st.markdown("#### ✣ Knowledge Graph Entities")
+        entity_results = search_graph_index(search_term, "entities_fts", limit=25)
+        if entity_results:
+            st.success(f"{len(entity_results)} entity match(es) shown")
+            st.dataframe(
+                pd.DataFrame(entity_results).rename(columns={
+                    "entity_id": "Entity ID",
+                    "entity_type": "Entity Type",
+                    "searchable": "Indexed Content",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+        elif not (LOG / "knowledge_graph_search.sqlite").exists():
+            st.info(
+                "Knowledge-graph search index is not available yet. "
+                "Run the backend pipeline to build it."
+            )
+        else:
+            st.caption("No graph entities matched this search.")
+
+        # 3. Knowledge-graph relationship search
+        st.markdown("#### ⛓ Knowledge Graph Relationships")
+        relationship_results = search_graph_index(
+            search_term, "relationships_fts", limit=25
+        )
+        if relationship_results:
+            st.success(f"{len(relationship_results)} relationship match(es) shown")
+            st.dataframe(
+                pd.DataFrame(relationship_results).rename(columns={
+                    "source_id": "Source Entity",
+                    "target_id": "Target Entity",
+                    "relationship_type": "Relationship Type",
+                    "searchable": "Indexed Content",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No graph relationships matched this search.")
+
+        # 4. Pipeline stage search
+        st.markdown("#### ⚙ Pipeline Stages")
+        stage_results = search_pipeline_stages(search_term, stages)
+        summary_text = json.dumps(summary, ensure_ascii=False, default=str).lower()
+        if stage_results:
+            st.success(f"{len(stage_results)} pipeline stage match(es)")
+            st.dataframe(
+                pd.DataFrame(stage_results),
+                use_container_width=True,
+                hide_index=True,
+            )
+        elif search_term.lower() in summary_text:
+            st.info("The search term appears in the overall pipeline summary.")
+            st.json(summary)
+        else:
+            st.caption("No pipeline stages matched this search.")
+
+        total_matches = (
+            len(dataset_results) + len(entity_results)
+            + len(relationship_results) + len(stage_results)
+        )
+        if total_matches == 0:
+            st.warning(
+                "No matches found. Try a dataset name, entity ID, entity type, "
+                "relationship name (for example PLACED), or pipeline stage."
+            )
+
+# ================= DASHBOARD =================
+    if page == "Dashboard" and not search_term:
         k1, k2, k3, k4 = st.columns(4, gap="medium")
         with k1:
             kpi("⛁", "Datasets", f"{len(data):,}", f"✓ {len(data)}/{len(FILES)} loaded", "purple")
@@ -1004,9 +1197,100 @@ with main_col:
                     else:
                         st.info("Graph entity statistics are not available in the saved pipeline report.")
 
+                
                 elif kg_view == "Communities":
-                    st.info("Community detection has not yet been implemented in the backend.")
-                    st.caption("This tab is reserved for a future graph-community analysis module.")
+                    from src.knowledge_graph.community_analyzer import CommunityAnalyzer
+
+                    st.markdown("### Knowledge Graph Communities")
+                    st.caption(
+                        "Sample-based Louvain community detection "
+                        "using connected Olist customer relationships."
+                    )
+
+                    if st.button(
+                        "Run Community Detection",
+                        key="run_community_detection",
+                        type="primary",
+                    ):
+                        with st.spinner("Analyzing connected graph sample..."):
+                            analyzer = CommunityAnalyzer()
+                            result = analyzer.analyze()
+
+                            st.session_state["community_analysis_result"] = result
+
+                            if result.get("status") == "success":
+                                analyzer.save_report(result)
+                            else:
+                                st.warning(result.get("message", "Analysis failed."))
+
+                    community_result = st.session_state.get(
+                        "community_analysis_result"
+                    )
+
+                    if community_result:
+                        if community_result.get("status") == "success":
+                            c1, c2, c3, c4 = st.columns(4)
+
+                            c1.metric(
+                                "Communities",
+                                f"{community_result.get('total_communities', 0):,}",
+                            )
+                            c2.metric(
+                                "Analyzed Nodes",
+                                f"{community_result.get('analyzed_nodes', 0):,}",
+                            )
+                            c3.metric(
+                                "Relationships",
+                                f"{community_result.get('analyzed_edges', 0):,}",
+                            )
+                            c4.metric(
+                                "Connected Components",
+                                f"{community_result.get('connected_components', 0):,}",
+                            )
+
+                            st.success(community_result.get("message"))
+
+                            st.info(
+                                f"Analysis scope: {community_result.get('analysis_scope')} | "
+                                f"Sampled customers: "
+                                f"{community_result.get('sampled_customers', 0):,}"
+                            )
+
+                            community_rows = []
+
+                            for community in community_result.get("communities", []):
+                                community_rows.append({
+                                    "Community ID": community["community_id"],
+                                    "Size": community["size"],
+                                    "Entity Types": ", ".join(
+                                        f"{key}: {value}"
+                                        for key, value in community["entity_types"].items()
+                                    ),
+                                    "Sample Entities": ", ".join(
+                                        community["sample_entities"]
+                                    ),
+                                })
+
+                            if community_rows:
+                                st.dataframe(
+                                    community_rows,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+
+                        else:
+                            st.error(
+                                community_result.get(
+                                    "message",
+                                    "Community analysis failed.",
+                                )
+                            )
+                    else:
+                        st.info(
+                            "Click 'Run Community Detection' to analyze "
+                            "a connected sample of the knowledge graph."
+                        )
+
 
                 else:
                     if not data.empty:
@@ -1159,17 +1443,22 @@ with main_col:
                     placeholder="Type a dataset name..."
                 )
 
-                available_datasets = data[
-                    data["Dataset"].astype(str).str.contains(
-                        dataset_search,
-                        case=False,
-                        na=False,
-                        regex=False
-                    )
-                ]["Dataset"].tolist()
+                if dataset_search.strip():
+                    available_datasets = data[
+                        data["Dataset"].astype(str).str.contains(
+                            dataset_search.strip(),
+                            case=False,
+                            na=False,
+                            regex=False
+                        )
+                    ]["Dataset"].tolist()
+                else:
+                    available_datasets = []
 
-                if not available_datasets:
-                    st.warning("No datasets match your search.")
+                if not dataset_search.strip():
+                    st.info("Type a dataset name to search.")
+                elif not available_datasets:
+                     st.warning("No datasets match your search.")
                 else:
                     selected = st.selectbox(
                         "Select dataset",
@@ -1199,23 +1488,28 @@ with main_col:
                     st.divider()
 
                     # Global search
+                    
                     st.markdown("#### Search records")
-                    global_search = st.text_input(
+
+                    record_search = st.text_input(
                         "Search across all columns",
-                        placeholder="Enter an ID, city, status or value..."
+                        placeholder="Enter an ID, city, status or value...",
+                        key="record_search"
                     )
 
                     filtered = frame.copy()
 
-                    if global_search.strip():
-                        search_mask = filtered.astype("string").apply(
+                    if record_search.strip():
+                        search_mask = filtered.astype(str).apply(
                             lambda column: column.str.contains(
-                                global_search.strip(),
+                                record_search.strip(),
                                 case=False,
                                 na=False,
                                 regex=False
                             )
                         ).any(axis=1)
+
+    
 
                         filtered = filtered.loc[search_mask]
 
