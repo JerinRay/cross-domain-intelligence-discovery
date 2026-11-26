@@ -38,6 +38,18 @@ except ImportError as _add_dataset_error:  # keep the dashboard usable if the ne
     def render_add_dataset(root):
         st.error(f"Add Dataset page could not be loaded: {_add_dataset_error_text}")
 
+try:
+    from components.chat_box import render_chat_box
+except ImportError as _chat_error:  # the dashboard still works without the chat box
+    def render_chat_box(facts):
+        return None
+
+try:
+    from components.haptics import enable_haptics
+except ImportError:  # haptics are optional; the dashboard works without them
+    def enable_haptics(enabled=True):
+        return None
+
 st.set_page_config(
     page_title="Cross-Domain Intelligence",
     page_icon="◈",
@@ -71,7 +83,6 @@ NAV_ITEMS = {
     "Knowledge Graph": "✣",
     "Intelligence": "◬",
     "Reports": "▤",
-    "AI Assistant": "✦",
 }
 
 # ---------------- colour themes ----------------
@@ -127,6 +138,31 @@ GREEN = "#3fd68a"
 RED = "#ff5d6c"
 TEXT = "#f3efe6"
 MUTED = "#9a9fae"
+
+# One colour per domain, shared by the knowledge-graph view and the donut so the
+# same domain never changes colour between charts.  (core colour, light tint)
+DOMAIN_COLORS = {
+    "OrderItem": ("#a76bff", "#eadcff"),
+    "Payment":   ("#3f8fff", "#d3e7ff"),
+    "Customer":  ("#f3b649", "#fff1cc"),
+    "Order":     ("#26cbd8", "#d4fcff"),
+    "Review":    ("#ff7ccf", "#ffe1f4"),
+    "Product":   ("#7c64ff", "#ddd6ff"),
+    "Seller":    ("#52d69a", "#d8f9e8"),
+    "Location":  ("#ff9d5c", "#ffe5d1"),
+}
+_EXTRA_COLORS = [("#e46ad8", "#fbd9f6"), ("#8fd14f", "#e6f7d4"), ("#5fb3ff", "#dcefff"), ("#ffcf5c", "#fff3d1")]
+OTHERS_COLOR = "#8a8f9c"
+
+
+def domain_color(name, light=False):
+    """Stable colour for a domain; unknown (uploaded) domains get a stable extra colour."""
+    pair = DOMAIN_COLORS.get(name)
+    if pair is None:
+        pair = _EXTRA_COLORS[sum(map(ord, str(name))) % len(_EXTRA_COLORS)]
+    return pair[1] if light else pair[0]
+
+
 
 # ------------------------- CSS ----------------------------
 
@@ -199,8 +235,6 @@ div[data-testid="stButton"] button[kind="primary"]:hover{color:#fff}
   background:rgba(14,15,21,.8);padding:10px 16px;color:#b9b6ad;font-size:13px}
 .search kbd{margin-left:auto;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:7px;
   padding:2px 7px;font:600 11px 'Exo 2',system-ui,sans-serif;color:#ddd}
-.bell{position:relative;font-size:20px;color:#d8d4ca}
-.bell:after{content:'';position:absolute;top:0;right:-2px;width:7px;height:7px;border-radius:50%;background:var(--gold)}
 .profile{display:flex;align-items:center;gap:10px}
 .avatar{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font:700 14px 'Exo 2',system-ui,sans-serif;color:#2a1d08;
   background:linear-gradient(140deg,#f4cf8c,#c08c3e)}
@@ -641,6 +675,94 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover,[class*="st-key-glass"]:ho
 .kv-i small{display:block;color:#a7a399;font-size:13px;text-transform:capitalize}
 .kv-i b{color:#fff;font-weight:600;font-size:17px;word-break:break-word}
 
+/* =================== REVIEW FIXES (Nov 2026) =================== */
+/* live System Health */
+.health-check.bad{background:rgba(255,93,108,.14)!important;color:#ff8a94!important;border-color:rgba(255,93,108,.5)!important}
+.health-card.warn .health-title .dot{background:var(--gold)!important;box-shadow:0 0 10px rgba(233,183,101,.8)!important}
+.health-card.bad .health-title .dot{background:#ff5d6c!important;box-shadow:0 0 10px rgba(255,93,108,.8)!important}
+.health-card.warn .health-pulse{color:var(--gold)!important}.health-card.bad .health-pulse{color:#ff5d6c!important}
+.health-card.warn .health-sub{color:#f5cd86!important}.health-card.bad .health-sub{color:#ff8a94!important}
+.health-card .health-title .dot{animation:hpulse 2s ease-in-out infinite!important}
+@keyframes hpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.6}}
+.health-time{font-size:11.5px;color:#8f8a7f;text-align:right;margin-top:10px}
+.health-grid>div{cursor:help}
+.hc-name{font-weight:600;color:#fff;font-size:14px;margin:8px 0 2px}
+.hc-line{font-size:12.5px;color:#cfcabd;padding-left:14px;position:relative;line-height:1.55}
+.hc-line::before{content:"";position:absolute;left:2px;top:7px;width:6px;height:6px;border-radius:50%;background:#3fd68a}
+.hc-line.warn::before{background:#e9b765}.hc-line.bad::before{background:#ff5d6c}.hc-line.info::before{background:#8a8f9c}
+.hc-line.bad{color:#ff8a94}
+/* KPI cards whose value is a word (e.g. "Isolation Forest"): smaller text, chip wraps below if needed */
+.kpi.text .kpi-value{font-size:clamp(20px,1.55vw,28px)!important;white-space:normal!important;line-height:1.15!important}
+.kpi.text .kpi-row{flex-wrap:wrap!important;row-gap:6px}
+.kpi.text .kpi-chip{white-space:nowrap}
+/* compact Self-Evolving Graph panel */
+.evo-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.evo-mini{display:flex;gap:8px;flex-wrap:wrap}
+.evo-m{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:6px 12px;min-width:74px}
+.evo-m b{display:block;color:#fff;font:600 20px/1.15 'Exo 2',system-ui,sans-serif}
+.evo-m small{display:block;color:#a7a399;font-size:11.5px}
+.evo-tl.sm{margin:0;padding:0;flex:1;min-width:260px}
+.evo-tl.sm .evo-v{min-width:70px}
+.evo-tl.sm .evo-v b{width:30px;height:30px;font-size:12px}
+.evo-tl.sm .evo-v small{font-size:11px;max-width:96px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.evo-tl.sm .evo-l{margin-bottom:18px;min-width:16px}
+.evo-hint{flex:1;min-width:240px;font-size:13.5px;color:#cfcabd}.evo-hint b{color:#f5cd86}
+.evo-last{font-size:12.5px;color:#a7a399;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-key-run_btn_evo button{min-height:40px!important;padding:0 18px!important;width:100%!important}
+.st-key-run_btn_evo button p{font-size:15px!important}
+.st-key-evo_review button{min-height:36px!important}
+.st-key-evo_review button p{font-size:13.5px!important}
+/* the haptics installer is a zero-size component; keep it out of the layout */
+[class*="st-key-haptics_holder"]{position:absolute!important;width:0!important;height:0!important;overflow:hidden!important}
+/* clickable stepper: an invisible button covers each stage node */
+[class*="st-key-stage_row"] [data-testid="stColumn"],[class*="st-key-stage_row"] [data-testid="column"]{position:relative}
+[class*="st-key-pfbtn_"]{position:absolute!important;inset:0;z-index:3;margin:0!important}
+[class*="st-key-pfbtn_"] [data-testid="stButton"],[class*="st-key-pfbtn_"] button{height:100%!important;width:100%!important}
+[class*="st-key-pfbtn_"] button{opacity:0!important;cursor:pointer!important;min-height:0!important}
+.pfc{position:relative;padding:12px 0 4px}
+.pfc:not(.first)::before{content:"";position:absolute;top:43px;left:calc(-50% + 22px);right:calc(50% + 36px);
+  height:3px;border-radius:2px;background:linear-gradient(90deg,rgba(63,214,138,.85),rgba(63,214,138,.55))}
+.pfc.failed::before,.pfc.queued::before{background:rgba(255,255,255,.12)}
+.pfc .pf-ring{transition:transform .18s ease,box-shadow .18s ease}
+[class*="st-key-stage_row"] [data-testid="stColumn"]:hover .pf-ring,
+[class*="st-key-stage_row"] [data-testid="column"]:hover .pf-ring{transform:translateY(-3px);box-shadow:0 0 0 4px rgba(233,183,101,.22)}
+[class*="st-key-stage_row"] [data-testid="stColumn"]:hover .pf-name,
+[class*="st-key-stage_row"] [data-testid="column"]:hover .pf-name{color:#f3cd85}
+
+/* status values as coloured badges */
+.st-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.st-badge{font-size:13.5px;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid}
+.st-badge.ok{color:#7ff0b4;border-color:rgba(63,214,138,.5);background:rgba(63,214,138,.10)}
+.st-badge.warn{color:#f5cd86;border-color:rgba(233,183,101,.55);background:rgba(233,183,101,.10)}
+.st-badge.bad{color:#ff8a94;border-color:rgba(255,93,108,.55);background:rgba(255,93,108,.10)}
+
+/* footer of the pipeline panel stays on one line */
+.ff div{white-space:nowrap}
+
+/* ticker fades out at both edges so the scrolling text never looks clipped */
+.ticker{-webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)}
+
+/* selected-domain card in the knowledge-graph panel */
+.dom-card{border:1px solid var(--line2);border-radius:14px;padding:12px 14px;margin-top:10px;background:rgba(255,255,255,.03)}
+.dom-card .dom-name{font:600 17px 'Exo 2',system-ui,sans-serif;color:#fff;display:flex;align-items:center;gap:8px}
+.dom-card .dom-name i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dom-card .dom-meta{font-size:13.5px;color:#cfcabd;margin-top:6px;line-height:1.55}
+.dom-card .dom-hint{font-size:12.5px;color:#a7a399}
+
+/* graph-version timeline in the Self-Evolving Graph panel */
+.evo-tl{display:flex;align-items:center;gap:0;margin:6px 0 14px;overflow-x:auto;padding:4px 2px}
+.evo-v{flex:0 0 auto;text-align:center;min-width:92px}
+.evo-v b{display:inline-grid;place-items:center;width:42px;height:42px;border-radius:50%;font:700 14px 'Exo 2',system-ui,sans-serif;
+  color:#1d1406;background:linear-gradient(135deg,#ffe0a1,#b9853c);box-shadow:0 0 14px rgba(233,183,101,.35)}
+.evo-v.now b{box-shadow:0 0 0 4px rgba(233,183,101,.28),0 0 18px rgba(233,183,101,.5)}
+.evo-v small{display:block;font-size:12px;color:#cfcabd;margin-top:6px;max-width:120px;white-space:normal}
+.evo-l{flex:1 1 30px;min-width:24px;height:3px;border-radius:2px;margin-bottom:22px;
+  background:linear-gradient(90deg,rgba(233,183,101,.85),rgba(233,183,101,.45))}
+.evo-empty{border:1px dashed rgba(233,183,101,.45);border-radius:14px;padding:14px 16px;margin:6px 0 12px;
+  color:#e9e4d8;font-size:15px;background:rgba(233,183,101,.05)}
+.evo-empty b{color:#f5cd86}
+
 </style>
 """
 st.markdown(themed_css(THEME_HUE), unsafe_allow_html=True)
@@ -717,6 +839,21 @@ def glass_panel(name):
         return st.container(border=True, key=f"glass_{name}")
     except TypeError:
         return st.container(border=True)
+    except Exception as exc:
+        _stop_if_duplicate_pass(exc)
+        raise
+
+
+def _stop_if_duplicate_pass(exc):
+    """If this script body is running a second time inside the same page run, end
+    that second pass quietly. The first, complete page stays on screen.
+
+    Keyed elements can only clash when the whole script runs twice in one run
+    (seen on some machines when a rerun overlaps another); every key here is unique.
+    """
+    if "DuplicateElementKey" in type(exc).__name__ or "DuplicateElementId" in type(exc).__name__:
+        print("[dashboard] skipped a duplicate script pass:", exc.__class__.__name__, flush=True)
+        st.stop()
 
 
 @st.cache_data(show_spinner=False)
@@ -786,6 +923,54 @@ def load_frame(path_str, mtime):
 @st.cache_data(show_spinner=False)
 def read_anomaly_csv(mtime):
     return pd.read_csv(ANOMALY_CSV)
+
+
+def anomaly_trend_figure(frame):
+    """Flagged orders per month (with axes and an average line).
+
+    Falls back to the smoothed first numeric feature if the CSV has no purchase timestamp.
+    """
+    axis = dict(showgrid=True, gridcolor="rgba(255,255,255,.06)", zeroline=False,
+                tickfont=dict(size=11, color="#a7a399"), linecolor="rgba(255,255,255,.15)")
+    fig = go.Figure()
+    if "order_purchase_timestamp" in frame.columns:
+        when = pd.to_datetime(frame["order_purchase_timestamp"], errors="coerce").dropna()
+        if when.empty:
+            return None
+        monthly = when.dt.to_period("M").value_counts().sort_index()
+        x = monthly.index.to_timestamp()
+        y = monthly.values
+        avg = float(y.mean())
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="lines+markers", line=dict(color="#b57bff", width=2.2, shape="spline"),
+            marker=dict(size=5, color="#d6c2ff"), fill="tozeroy", fillcolor="rgba(157,107,255,.20)",
+            hovertemplate="%{x|%b %Y}: %{y:,} flagged orders<extra></extra>"))
+        peak = int(y.argmax())
+        fig.add_trace(go.Scatter(
+            x=[x[peak]], y=[y[peak]], mode="markers", hoverinfo="skip",
+            marker=dict(size=11, color="#ffe3b0", line=dict(color=GOLD, width=3))))
+        fig.add_hline(y=avg, line=dict(color=GOLD, width=1.2, dash="dash"),
+                      annotation_text=f"avg {avg:,.0f}/month", annotation_position="bottom right",
+                      annotation_font=dict(size=11, color=GOLD))
+        y_title = "flagged orders"
+    else:
+        numeric = frame.select_dtypes(include="number").columns.tolist()
+        if not numeric:
+            return None
+        chosen = "approval_delay_hours" if "approval_delay_hours" in numeric else numeric[0]
+        series = frame[chosen].dropna().head(150).reset_index(drop=True).rolling(5, min_periods=1).mean()
+        fig.add_trace(go.Scatter(y=series, mode="lines", line=dict(color="#b57bff", width=2, shape="spline"),
+                                 fill="tozeroy", fillcolor="rgba(157,107,255,.22)",
+                                 hovertemplate=f"{chosen}: %{{y:,.2f}}<extra></extra>"))
+        fig.add_hline(y=float(series.median()), line=dict(color=GOLD, width=1.2, dash="dash"),
+                      annotation_text="median", annotation_font=dict(size=11, color=GOLD))
+        y_title = chosen.replace("_", " ")
+    fig.update_layout(
+        height=210, margin=dict(l=4, r=8, t=8, b=4), showlegend=False,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=axis, yaxis=dict(axis, title=dict(text=y_title, font=dict(size=11, color="#a7a399"))),
+        hoverlabel=dict(bgcolor="rgba(16,18,28,.95)", bordercolor=GOLD, font=dict(color="#f3efe6")))
+    return fig
 
 
 def kpi(icon, label, value, chip, tone):
@@ -960,11 +1145,6 @@ def _build_schema_graph(entity_counts, height=480):
     rng = random.Random(7)
     names = sorted(entity_counts, key=entity_counts.get, reverse=True)
     total = sum(entity_counts.values())
-    palette = [  # (core colour, light tint)
-        ("#a76bff", "#eadcff"), ("#3f8fff", "#d3e7ff"), ("#f3b649", "#fff1cc"),
-        ("#26cbd8", "#d4fcff"), ("#ff7ccf", "#ffe1f4"), ("#7c64ff", "#ddd6ff"),
-        ("#52d69a", "#d8f9e8"), ("#ff9d5c", "#ffe5d1"),
-    ]
     widths = [3.0, 2.0, 1.3, 0.8]
 
     def rgba(hex_colour, alpha):
@@ -1033,7 +1213,7 @@ def _build_schema_graph(entity_counts, height=480):
     k = len(names)
     somas, small = {}, []
     for idx, name in enumerate(names):
-        colour, light = palette[idx % len(palette)]
+        colour, light = domain_color(name), domain_color(name, light=True)
         ang = math.radians(140) - 2 * math.pi * idx / max(k, 1)
         sx, sy = (math.cos(ang) * .72, math.sin(ang) * .64) if k > 1 else (0, 0)
         somas[name] = (sx, sy, colour, light)
@@ -1123,11 +1303,11 @@ def _build_schema_graph(entity_counts, height=480):
             marker=dict(size=25, color="#ffffff", gradient=dict(type="radial", color=colour),
                         line=dict(color=rgba(light, .95), width=1.4)),
             customdata=[[name, entity_counts[name], entity_counts[name] / total * 100 if total else 0]],
-            hovertemplate="<b>%{customdata[0]}</b><br>Entities: %{customdata[1]:,}"
-                          "<br>Share: %{customdata[2]:.1f}%<extra></extra>"))
+            hovertemplate="<b>%{customdata[0]}</b> · %{customdata[1]:,} entities"
+                          " (%{customdata[2]:.1f}%)<br><i>click for details</i><extra></extra>"))
         norm = math.hypot(x, y) or 1
         fig.add_annotation(
-            x=x + x / norm * .34, y=y + y / norm * .27, showarrow=False,
+            x=x + x / norm * .40, y=y + y / norm * .32, showarrow=False,
             text=f"<span style='color:{colour}'>●</span>  {name}",
             font=dict(size=16, color="#f6f2ea", family="Exo 2, sans-serif"),
             bgcolor="rgba(14,16,28,.62)", bordercolor=rgba(colour, .9), borderwidth=1.3, borderpad=8)
@@ -1157,10 +1337,12 @@ def _build_schema_graph(entity_counts, height=480):
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         xaxis=dict(visible=False, range=[-1.3, 1.3], fixedrange=True),
         yaxis=dict(visible=False, range=[-1.1, 1.1], fixedrange=True, scaleanchor="x"),
-        showlegend=False,
+        showlegend=False, dragmode=False, clickmode="event+select",
         hoverlabel=dict(bgcolor="rgba(16,18,28,.95)", bordercolor="#e9b765",
-                        font=dict(color="#f3efe6", family="Exo 2, sans-serif", size=16)),
+                        font=dict(color="#f3efe6", family="Exo 2, sans-serif", size=13)),
     )
+    # clicking a neuron must not fade the rest of the picture
+    fig.update_traces(selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1)))
     return fig
 
 
@@ -1173,22 +1355,65 @@ def make_schema_graph(entity_counts, height=480):
     return _schema_graph_cached(tuple(sorted(entity_counts.items())), height, GOLD)
 
 
+# Same schema links the graph draws; used for the clicked-domain card.
+SCHEMA_LINKS = [("Customer", "Order"), ("Order", "OrderItem"), ("OrderItem", "Product"),
+                ("OrderItem", "Seller"), ("Order", "Payment"), ("Order", "Review"),
+                ("Customer", "Location"), ("Seller", "Location")]
+
+
+def _graph_with_click(fig):
+    """Draw the knowledge graph; clicking a domain neuron stores it in session state."""
+    try:
+        event = st.plotly_chart(fig, config={"displayModeBar": False},
+                                on_select="rerun", selection_mode="points", key="kg_chart")
+    except TypeError:  # Streamlit older than 1.35 has no chart selection events
+        st.plotly_chart(fig, config={"displayModeBar": False})
+        return st.session_state.get("kg_domain")
+    try:
+        points = event.get("selection", {}).get("points", []) if event else []
+    except AttributeError:
+        points = []
+    for point in points:
+        data_ = point.get("customdata")
+        if isinstance(data_, (list, tuple)) and data_ and str(data_[0]) in entity_counts:
+            st.session_state.kg_domain = str(data_[0])
+            break
+    picked = st.session_state.get("kg_domain")
+    return picked if picked in entity_counts else None
+
+
+def domain_card_html(name):
+    """Details for the domain clicked in the knowledge graph."""
+    if not name:
+        return ('<div class="dom-card"><div class="dom-hint">Click a domain in the graph '
+                'to see its size and how it links to the other domains.</div></div>')
+    count = entity_counts.get(name, 0)
+    total = sum(entity_counts.values()) or 1
+    links = sorted({b if a == name else a for a, b in SCHEMA_LINKS
+                    if name in (a, b) and {a, b} <= set(entity_counts)})
+    linked = ", ".join(_esc(x) for x in links) if links else "no schema links"
+    return (f'<div class="dom-card"><div class="dom-name"><i style="background:{domain_color(name)}"></i>'
+            f'{_esc(name)}</div><div class="dom-meta">{count:,} entities · {count / total * 100:.1f}% of graph'
+            f'<br>Linked to: {linked}</div></div>')
+
+
 def make_donut(entity_counts, entities):
     ordered = sorted(entity_counts.items(), key=lambda kv: kv[1], reverse=True)
     top, rest = ordered[:4], ordered[4:]
     labels = [k for k, _ in top] + (["Others"] if rest else [])
     values = [v for _, v in top] + ([sum(v for _, v in rest)] if rest else [])
-    colors = [PURPLE, BLUE, TEAL, GOLD, "#8a8f9c"][:len(labels)]
+    colors = [domain_color(k) for k, _ in top] + ([OTHERS_COLOR] if rest else [])
     fig = go.Figure(go.Pie(
         labels=labels, values=values, hole=.72, sort=False,
         marker=dict(colors=colors, line=dict(color="#0d0e14", width=3)),
         textinfo="none", hovertemplate="%{label}: %{value:,} (%{percent})<extra></extra>",
     ))
-    centre = f"{entities / 1000:.0f}K" if entities >= 1000 else f"{entities:,}"
+    # The entity total is already shown in the ticker and the graph panel, so the
+    # centre shows the number of domains instead.
     fig.update_layout(
         height=240, margin=dict(l=0, r=0, t=0, b=0), showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)",
-        annotations=[dict(text=f"<b>{centre}</b><br><span style='font-size:17px'>Entities</span>",
+        annotations=[dict(text=f"<b>{len(entity_counts)}</b><br><span style='font-size:17px'>Domains</span>",
                           x=.5, y=.5, showarrow=False, font=dict(size=34, color="white", family="Exo 2, sans-serif"))],
     )
     total = sum(values) or 1
@@ -1211,6 +1436,41 @@ anomaly = stages.get("ANOMALY_DETECTION", {}).get("result", {})
 data = load_inventory()
 discovery_path = latest_discovery_file()
 discovery = read_json(discovery_path) if discovery_path else {}
+_disc_meta = discovery.get("metadata", discovery) if isinstance(discovery, dict) else {}
+scan_candidates = _disc_meta.get("total_relationship_candidates", "—")
+
+
+def discovery_scan_time(path, meta):
+    """When the cross-domain scan ran: report's generated_at, else the file time."""
+    stamp = (meta or {}).get("generated_at")
+    try:
+        when = datetime.fromisoformat(str(stamp)).astimezone() if stamp else None
+    except ValueError:
+        when = None
+    if when is None and path and Path(path).exists():
+        when = datetime.fromtimestamp(Path(path).stat().st_mtime).astimezone()
+    return when
+
+
+def pipeline_report_newer_than(when, slack_minutes=30):
+    """True when the pipeline report is clearly newer than the scan.
+
+    The Discover stage writes the scan part-way through a run, so a scan from the
+    same run is a few seconds older than the report; the slack ignores that.
+    """
+    if not when or not PIPELINE_PATH.exists():
+        return False
+    report_time = datetime.fromtimestamp(PIPELINE_PATH.stat().st_mtime).astimezone()
+    return (report_time - when).total_seconds() > slack_minutes * 60
+
+
+def run_cross_domain_scan():
+    """Re-run the cross-domain pattern scan over the Olist datasets (sampled, takes seconds)."""
+    from src.discovery.cross_domain_pattern_engine import CrossDomainPatternEngine
+    from src.discovery.olist_datasets import load_scan_frames
+    engine = CrossDomainPatternEngine(sample_size=3000)
+    report_ = engine.analyze(load_scan_frames(PROCESSED, max_rows=5000))
+    return engine.save_report(report_, output_dir=str(LOG / "cross_domain"))
 EVOLUTION_STATE = read_json(ROOT / "knowledge_base" / "state.json")
 _comm = read_json(LOG / "community_report.json")
 communities_text = f"{_comm['total_communities']:,}" if isinstance(_comm.get("total_communities"), int) else "—"
@@ -1237,7 +1497,7 @@ duration = format_duration(first_key(summary, "total_duration_seconds", "duratio
 STAGE_INFO = {
     "INGESTION": ("⤓", "Ingest", "Loads the raw files, checks their quality and saves them as Parquet."),
     "DATA_UNDERSTANDING": ("⚙", "Understand", "Profiles every column: types, missing values, distributions and outliers."),
-    "DATA_DISCOVERY": ("⌕", "Discover", "Looks for join keys and relationship candidates between datasets."),
+    "DATA_DISCOVERY": ("⌕", "Discover", "Finds join keys between Orders and Order Items, then scans every pair of Olist tables for cross-domain links."),
     "ANOMALY_DETECTION": ("◬", "Anomaly", "Flags unusual records with an Isolation Forest model."),
     "NLP_PROCESSING": ("¶", "NLP", "Cleans review text and prepares it for entity recognition."),
     "KNOWLEDGE_GRAPH": ("✣", "Graph", "Builds the knowledge graph and validates it."),
@@ -1312,6 +1572,66 @@ def _flatten_result(value, prefix=""):
 
 def _select_stage(name):
     st.session_state.pipeline_stage = name
+
+
+def _stage_node_html(key, label, state, sel=False, first=False):
+    """One stepper node (ring + name) for the clickable stage row."""
+    mark = {"done": ("✓", ""), "failed": ("!", " bad")}.get(state)
+    badge = f'<span class="pf-badge{mark[1]}">{mark[0]}</span>' if mark else ""
+    return (f'<div class="pfc pf-node {state}{" sel" if sel else ""}{" first" if first else ""}">'
+            f'<div class="pf-ring"><svg viewBox="0 0 24 24" aria-hidden="true">{PIPE_ICON.get(key, PIPE_ICON["OUT"])}</svg>'
+            f'{badge}</div><div class="pf-name">{_esc(label)}</div></div>')
+
+
+# Friendlier names for result fields whose raw keys are confusing on screen.
+_LABEL_RENAMES = {
+    "INGESTION": {
+        "result · items": "Files ingested",
+        "result · status": "Load status",
+        "result · quality status": "Quality check",
+    },
+}
+_STATUS_TONES = {
+    "SUCCESS": "ok", "CLEAN": "ok", "PASSED": "ok", "OK": "ok", "VALID": "ok",
+    "WARNING": "warn", "WARN": "warn", "PARTIAL": "warn",
+    "FAILED": "bad", "ERROR": "bad", "INVALID": "bad",
+}
+_STATUS_PART_RE = re.compile(r"^\s*(\d[\d,]*)\s+([A-Z_]+)\s*$")
+
+
+def _nice_label(stage, label):
+    return _LABEL_RENAMES.get(stage, {}).get(label, label)
+
+
+def _is_status_list(value):
+    parts = str(value).split(",")
+    return all(_STATUS_PART_RE.match(p) and _STATUS_PART_RE.match(p).group(2) in _STATUS_TONES for p in parts)
+
+
+def _status_value_html(value):
+    """'6 CLEAN, 4 WARNING' -> coloured badges; anything else -> escaped text."""
+    text = str(value)
+    if not _is_status_list(text):
+        return _esc(text)
+    badges = []
+    for part in text.split(","):
+        n, word = _STATUS_PART_RE.match(part).groups()
+        tone = _STATUS_TONES[word]
+        badges.append(f'<span class="st-badge {tone}">{_esc(n)} {_esc(word.title())}</span>')
+    return '<span class="st-badges">' + "".join(badges) + "</span>"
+
+
+def format_when(value):
+    """Short, single-line timestamp such as '26 Nov 2026, 17:50'."""
+    if not value:
+        return "—"
+    text = str(value)
+    for parse in (datetime.fromisoformat, lambda v: datetime.strptime(v, "%b %d, %Y %I:%M %p")):
+        try:
+            return parse(text).strftime("%d %b %Y, %H:%M")
+        except (ValueError, TypeError):
+            continue
+    return text
 
 
 def _pipeline_proc():
@@ -1403,8 +1723,8 @@ def _pipeline_panel_body(stages_map, last_run_text, duration_text, records):
         st.warning("This re-runs all 6 stages (about 1 to 2 minutes) and replaces the saved pipeline report. "
                    "The previous report is kept as a backup.")
         c1, c2, _gap = st.columns([1, 1, 3])
-        c1.button("Start run", key="pl_start", type="primary", on_click=_start_pipeline, use_container_width=True)
-        c2.button("Cancel", key="pl_cancel", on_click=_cancel_confirm, use_container_width=True)
+        c1.button("Start run", key="pl_start", type="primary", on_click=_start_pipeline, width="stretch")
+        c2.button("Cancel", key="pl_cancel", on_click=_cancel_confirm, width="stretch")
     else:
         try:
             holder = st.container(key="run_btn")
@@ -1424,24 +1744,29 @@ def _pipeline_panel_body(stages_map, last_run_text, duration_text, records):
         st.session_state.pipeline_stage = names[0]
     chosen = st.session_state.pipeline_stage
     states = {n: ("done" if s.get("status") == "SUCCESS" else "failed") for n, s in stages_map.items()}
-    html(pipeline_diagram_html(states, selected=chosen))
 
+    # The stepper itself is clickable: each stage node has an invisible button laid
+    # over it, so there is no second row of pills repeating the same stages.
     try:
         row = st.container(key="stage_row")
     except TypeError:
         row = st.container()
     with row:
-        for col, name in zip(st.columns(len(names), gap="small"), names):
+        for i, (col, name) in enumerate(zip(st.columns(len(names), gap="small"), names)):
             short = STAGE_INFO.get(name, ("•", name.replace("_", " ").title(), ""))[1]
-            col.button(short, key=f"stage_{name}", on_click=_select_stage, args=(name,), use_container_width=True,
-                       type="primary" if chosen == name else "secondary")
+            with col:
+                html(_stage_node_html(name, short, states.get(name, "queued"), sel=(name == chosen), first=(i == 0)))
+                st.button(f"Show {short} details", key=f"pfbtn_{name}", on_click=_select_stage, args=(name,),
+                          width="stretch")
+    st.caption("Click a stage to see its details.")
 
     info = stages_map[chosen]
     icon, short, desc = STAGE_INFO.get(chosen, ("•", chosen.replace("_", " ").title(), ""))
     badge = ('<span class="chip-ok">✓ Success</span>' if info.get("status") == "SUCCESS"
              else f'<span class="chip-warn">{_esc(str(info.get("status", "UNKNOWN")))}</span>')
     cards = "".join(
-        f'<div class="kv-i{" long" if len(v) > 36 else ""}"><small>{_esc(k)}</small><b>{_esc(v)}</b></div>'
+        f'<div class="kv-i{" long" if len(v) > 36 and not _is_status_list(v) else ""}">'
+        f'<small>{_esc(_nice_label(chosen, k))}</small><b>{_status_value_html(v)}</b></div>'
         for k, v in _flatten_result(info.get("result"))[:12])
     html(f'<div class="stage-detail"><div class="stage-head"><div class="stage-name">{icon} {_esc(short)}</div>{badge}</div>'
          f'<div class="stage-desc">{_esc(desc)}</div><div class="kv">{cards}</div></div>')
@@ -1450,7 +1775,7 @@ def _pipeline_panel_body(stages_map, last_run_text, duration_text, records):
     with st.expander("Raw result (JSON)"):
         st.json(info.get("result", {}))
     html('<div class="flow-foot">'
-         f'<div class="ff"><span>▦</span><div><small>Last Run</small>{_esc(str(last_run_text or "—"))}</div></div>'
+         f'<div class="ff"><span>▦</span><div><small>Last Run</small>{_esc(format_when(last_run_text))}</div></div>'
          f'<div class="ff"><span>◷</span><div><small>Duration</small>{_esc(str(duration_text))}</div></div>'
          f'<div class="ff"><span>⛁</span><div><small>Processed Records</small>{records:,}</div></div></div>')
 
@@ -1471,22 +1796,207 @@ def stage_ok(*names):
     return bool(present) and all(s.get("status") == "SUCCESS" for s in present)
 
 
+# ----------------------- SYSTEM HEALTH -------------------------
+# Real checks on every rerun: pipeline stage results plus the files each part of
+# the system needs (processed tables, graph export, search index, anomaly output).
+
+_RANK = {"ok": 0, "info": 0, "warn": 1, "bad": 2}
+STALE_DAYS = 7
+
+
+def _age_text(seconds):
+    if seconds < 3600:
+        return f"{max(int(seconds // 60), 1)} min ago"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} h ago"
+    return f"{int(seconds // 86400)} days ago"
+
+
+def _stage_line(name, label, stage_map=None):
+    info = (stages if stage_map is None else stage_map).get(name)
+    if info is None:
+        return ("bad", f"{label} stage has not run")
+    if info.get("status") == "SUCCESS":
+        return ("ok", f"{label} stage succeeded")
+    return ("bad", f"{label} stage {str(info.get('status', 'failed')).lower()}: "
+                   f"{str(info.get('error') or '')[:80]}".rstrip(": "))
+
+
+def _file_line(path, label):
+    path = Path(path) if path else None
+    if path and not path.is_absolute():
+        path = ROOT / path
+    if path and path.exists():
+        return ("ok", f"{label} found ({path.stat().st_size / 1048576:.1f} MB)")
+    return ("bad", f"{label} missing")
+
+
+def _search_index_line():
+    db = LOG / "knowledge_graph_search.sqlite"
+    if not db.exists():
+        return ("bad", "Search index missing")
+    try:
+        con = sqlite3.connect(f"file:{db.resolve()}?mode=ro", uri=True, timeout=2)
+        try:
+            con.execute("SELECT 1 FROM entities_fts LIMIT 1").fetchall()
+        finally:
+            con.close()
+        return ("ok", "Search index readable")
+    except sqlite3.Error as exc:
+        return ("bad", f"Search index unreadable: {exc}")
+
+
+def run_health_checks():
+    """[(name, state, [(state, text), ...]), ...] with state ok / warn / bad.
+
+    Re-reads the pipeline report and checks the files on disk every time, so it
+    notices changes made after the page loaded.
+    """
+    live = read_json(PIPELINE_PATH)
+    stages = live.get("stages", {})
+    graph_result = stages.get("KNOWLEDGE_GRAPH", {}).get("result", {}) or {}
+    anomaly = stages.get("ANOMALY_DETECTION", {}).get("result", {}) or {}
+    discovery_path = latest_discovery_file()
+
+    def _stage_line_(name, label):
+        return _stage_line(name, label, stages)
+
+    found = sum(locate(f) is not None for f in FILES.values())
+    ingest = [_stage_line_("INGESTION", "Ingestion"),
+              ("ok" if found == len(FILES) else "bad", f"{found}/{len(FILES)} Olist tables on disk")]
+    files_ = (stages.get("INGESTION", {}).get("result") or {}).get("result")
+    if isinstance(files_, list):
+        warned = sum(str(f.get("quality_status", "")).upper() == "WARNING" for f in files_ if isinstance(f, dict))
+        if warned:
+            ingest.append(("info", f"{warned} file(s) have data-quality warnings"))
+
+    process = [_stage_line_("DATA_UNDERSTANDING", "Understanding"),
+               _stage_line_("DATA_DISCOVERY", "Discovery"),
+               _stage_line_("NLP_PROCESSING", "NLP")]
+    if discovery_path and Path(discovery_path).exists():
+        age = _time.time() - Path(discovery_path).stat().st_mtime
+        process.append(("ok" if age < STALE_DAYS * 86400 else "warn", f"Cross-domain scan {_age_text(age)}"))
+    else:
+        process.append(("warn", "No cross-domain scan yet"))
+
+    graph = [_stage_line_("KNOWLEDGE_GRAPH", "Graph"),
+             _file_line(graph_result.get("graph_export_path") or LOG / "olist_knowledge_graph_day11.json",
+                        "Graph export"),
+             _search_index_line()]
+
+    model = [_stage_line_("ANOMALY_DETECTION", "Anomaly"), _file_line(ANOMALY_CSV, "Anomaly results")]
+    a_n = anomaly.get("anomaly_count") or 0
+    a_t = anomaly.get("total_records") or (a_n + (anomaly.get("normal_count") or 0))
+    if a_t:
+        rate = a_n / a_t * 100
+        model.append(("ok" if 0.5 <= rate <= 5 else "warn", f"Anomaly rate {rate:.2f}% (expected about 2%)"))
+
+    out = []
+    for name, lines in (("Ingest", ingest), ("Process", process), ("Graph", graph), ("Model", model)):
+        out.append((name, max((s for s, _ in lines), key=_RANK.get), lines))
+    return out
+
+
+def health_summary(checks):
+    """(overall state, one-line status text)."""
+    if _pipeline_running():
+        return "warn", "Pipeline running…"
+    if not PIPELINE_PATH.exists():
+        return "bad", "Pipeline has not run yet"
+    worst = max((s for _, s, _ in checks), key=_RANK.get)
+    bad = [n for n, s, _ in checks if s == "bad"]
+    warn = [n for n, s, _ in checks if s == "warn"]
+    age = _time.time() - PIPELINE_PATH.stat().st_mtime
+    if bad:
+        return "bad", f"{', '.join(bad)} failing"
+    if warn:
+        return "warn", f"{', '.join(warn)} need attention"
+    if age > STALE_DAYS * 86400:
+        return "warn", f"All OK, but results are {_age_text(age)}"
+    return worst, "All services operational"
+
+
+def _health_panel_body():
+    health = run_health_checks()
+    overall, overall_text = health_summary(health)
+    icon = {"ok": "✓", "info": "✓", "warn": "!", "bad": "✕"}
+    cls = {"ok": "", "info": "", "warn": " warn", "bad": " bad"}
+    grid = "".join(
+        f'<div title="{_esc(" · ".join(t for _, t in lines))}">'
+        f'<div class="health-check{cls[state]}">{icon[state]}</div>'
+        f'<div class="health-label">{name}</div></div>' for name, state, lines in health
+    )
+    html(
+        f'<div class="health-card {overall}"><div class="health-top">'
+        f'<div class="health-title"><span class="dot"></span>System Health</div>'
+        f'<div class="health-pulse">∿</div></div>'
+        f'<div class="health-sub">{_esc(overall_text)}</div>'
+        f'<div class="health-grid">{grid}</div>'
+        f'<div class="health-time">Checked {datetime.now().strftime("%H:%M:%S")}</div></div>'
+    )
+    with st.expander("Health details"):
+        for name, state, lines in health:
+            html(f'<div class="hc-name">{icon[state]} {name}</div>' + "".join(
+                f'<div class="hc-line {s}">{_esc(t)}</div>' for s, t in lines))
+        if st.button("↻  Re-check now", key="health_recheck", width="stretch"):
+            st.cache_data.clear()
+            st.rerun()
+
+
+def _health_panel():
+    """System Health card. The checks run on every page rerun (any click) and on
+    "Re-check now". A timed auto-refresh was removed: on some machines it collided
+    with full page reruns and raised StreamlitDuplicateElementKey."""
+    _health_panel_body()
+
+
+# ----------------------- CHAT BOX FACTS -------------------------
+
+def chat_facts():
+    """Live numbers the floating chat box answers from (also sent to Gemini as context)."""
+    evo_ = EVOLUTION_STATE or {}
+    cands = evo_.get("candidates", [])
+    a_n = anomaly.get("anomaly_count", 0) or 0
+    a_t = anomaly.get("total_records") or (a_n + (anomaly.get("normal_count", 0) or 0))
+    words = {"ok": "OK", "info": "OK", "warn": "needs attention", "bad": "failing"}
+    checks = run_health_checks()
+    _overall, health_text = health_summary(checks)
+    scanned_at = discovery_scan_time(discovery_path, _disc_meta)
+    return {
+        "entities": entities, "relationships": relationships, "avg_degree": avg_degree,
+        "domain_count": len(entity_counts),
+        "top_domains": sorted(entity_counts.items(), key=lambda kv: -kv[1])[:4],
+        "top_relationships": sorted(relationship_counts.items(), key=lambda kv: -kv[1])[:3],
+        "anomaly_count": a_n, "anomaly_total": a_t, "normal_count": anomaly.get("normal_count", 0) or 0,
+        "anomaly_rate": a_n / a_t * 100 if a_t else 0.0,
+        "anomaly_method": anomaly.get("method", "Isolation Forest"),
+        "pipeline_status": status, "stages_ok": success_count, "stages_total": stage_count,
+        "last_run": format_when(last_run), "duration": duration,
+        "health_text": health_text, "health": [(name, words[state]) for name, state, _ in checks],
+        "scan_pairs": _disc_meta.get("dataset_pair_count", "—"),
+        "scan_connected": _disc_meta.get("connected_dataset_pair_count", "—"),
+        "scan_hypotheses": _disc_meta.get("total_relationship_candidates", "—"),
+        "scan_when": f"scanned {scanned_at.strftime('%d %b %Y')}" if scanned_at else "no scan yet",
+        "graph_version": evo_.get("version", 0), "uploads": len(evo_.get("datasets", {})),
+        "accepted": sum(c.get("status") == "accepted" for c in cands),
+        "rejected": sum(c.get("status") == "rejected" for c in cands),
+        "pending": sum(c.get("status") == "pending" for c in cands),
+        "datasets": len(data), "records": record_count,
+    }
+
+
 # ----------------------- NAV STATE -------------------------
 
 if "active_page" not in st.session_state:
+    st.session_state.active_page = "Dashboard"
+if st.session_state.active_page not in NAV_ITEMS:   # e.g. the removed AI Assistant page
     st.session_state.active_page = "Dashboard"
 page = st.session_state.active_page
 
 # ----------------------- LAYOUT ---------------------------
 
-rail_col, nav_col, main_col = st.columns([0.055, 0.19, 0.755], gap="small")
-
-with rail_col:
-    rail = '<div class="rail"><div class="rail-logo">⋀</div>'
-    for item, icon in NAV_ITEMS.items():
-        rail += f'<div class="rail-ico{" active" if page == item else ""}" title="{item}">{icon}</div>'
-    rail += '<div class="rail-ico">⛉</div><div class="rail-ico">⚙</div></div>'
-    html(rail)
+# One sidebar only (the old icon rail repeated the same links without being clickable).
+nav_col, main_col = st.columns([0.2, 0.8], gap="small")
 
 with nav_col:
     with glass_panel("p1"):
@@ -1497,58 +2007,39 @@ with nav_col:
             '<div class="nav-heading">Navigation</div>'
         )
         for item, icon in NAV_ITEMS.items():
-            label = f"{icon}   {item}" + ("" if item == "Dashboard" else "   ›")
-            if st.button(label, key=f"navigation_{item}", use_container_width=True,
-                         type="primary" if item == page else "secondary"):
+            label = f"{icon}   {item}"
+            try:
+                clicked = st.button(label, key=f"navigation_{item}", width="stretch",
+                                    type="primary" if item == page else "secondary")
+            except Exception as exc:
+                _stop_if_duplicate_pass(exc)
+                raise
+            if clicked:
                 st.session_state.active_page = item
                 st.rerun()
 
-        checks = [
-            ("Ingest", stage_ok("INGESTION")),
-            ("Process", stage_ok("DATA_UNDERSTANDING", "DATA_DISCOVERY", "NLP_PROCESSING")),
-            ("Graph", stage_ok("KNOWLEDGE_GRAPH")),
-            ("Model", stage_ok("ANOMALY_DETECTION")),
-        ]
-        all_ok = all(ok for _, ok in checks)
-        grid = "".join(
-            f'<div><div class="health-check{"" if ok else " warn"}">{"✓" if ok else "!"}</div>'
-            f'<div class="health-label">{name}</div></div>' for name, ok in checks
-        )
-        html(
-            '<div class="health-card"><div class="health-top">'
-            '<div class="health-title"><span class="dot"></span>System Health</div>'
-            '<div class="health-pulse">∿</div></div>'
-            f'<div class="health-sub">{"All services operational" if all_ok else "Some stages need attention"}</div>'
-            f'<div class="health-grid">{grid}</div></div>'
-            '<div class="version">v1.1.0</div>'
-        )
+        _health_panel()
+        html('<div class="version">v1.1.0</div>')
         st.toggle("Smooth mode (faster)", value=True, key="smooth_mode",
                   help="Turns off blur, glow and most animations. Best for laptops.")
         st.selectbox("Colour theme", list(THEMES), key="theme")
+        try:
+            haptics_holder = st.container(key="haptics_holder")
+        except TypeError:
+            haptics_holder = st.container()
+        with haptics_holder:
+            enable_haptics(True)   # always on: tap feedback on phones, spring press everywhere
 
 
     
 with main_col:
-    search_col, bell_col, profile_col = st.columns([6, 0.5, 2])
-
-    with search_col:
-        global_search = st.text_input(
-            "Global Search",
-            placeholder="Search datasets, entities, relations, pipelines...",
-            label_visibility="collapsed",
-            key="global_search"
-        )
-
-    with bell_col:
-        st.markdown("<div class='bell'>🔔</div>", unsafe_allow_html=True)
-
-    with profile_col:
-        html(
-            '<div class="profile"><div class="avatar">JR</div>'
-            '<div><div class="p-name">Jerin Ray</div>'
-            '<div class="p-role">AI &amp; DS Engineer</div></div>'
-            '<span style="color:#d8d4ca">⌄</span></div>'
-        )
+    # Search bar first and full width (no profile or bell in the header).
+    global_search = st.text_input(
+        "Global Search",
+        placeholder="Search datasets, entities, relations, pipelines...",
+        label_visibility="collapsed",
+        key="global_search"
+    )
 
     html(
         '<div class="hero-title">Cross-Domain <em>Intelligence</em></div>'
@@ -1564,7 +2055,8 @@ with main_col:
         f"<b>{relationships:,}</b> relationships",
         f"<b>{(anomaly.get('anomaly_count', 0) or 0):,}</b> anomalies flagged",
         f"graph <b>v{(EVOLUTION_STATE or {}).get('version', 0)}</b>",
-        f"<b>{sum(c.get('status') == 'pending' for c in _evo_cands)}</b> links to review",
+        f"<b>{sum(c.get('status') == 'pending' for c in _evo_cands)}</b> upload links to review",
+        f"<b>{scan_candidates}</b> scan hypotheses",
         f"pipeline <b>{success_count}/{stage_count}</b> stages OK",
     ]
     _ticker_html = "".join(f'<span class="tk"><i></i><span>{t}</span></span>' for t in _ticker_items)
@@ -1601,7 +2093,7 @@ with main_col:
             ]
             st.dataframe(
                 dataset_results[display_columns],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
@@ -1618,7 +2110,7 @@ with main_col:
                     "entity_type": "Entity Type",
                     "searchable": "Indexed Content",
                 }),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         elif not (LOG / "knowledge_graph_search.sqlite").exists():
@@ -1643,7 +2135,7 @@ with main_col:
                     "relationship_type": "Relationship Type",
                     "searchable": "Indexed Content",
                 }),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
@@ -1657,7 +2149,7 @@ with main_col:
             st.success(f"{len(stage_results)} pipeline stage match(es)")
             st.dataframe(
                 pd.DataFrame(stage_results),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         elif search_term.lower() in summary_text:
@@ -1678,16 +2170,77 @@ with main_col:
 
 # ================= DASHBOARD =================
     if page == "Dashboard" and not search_term:
+        anomaly_count = anomaly.get("anomaly_count", 0) or 0
+        normal_count = anomaly.get("normal_count", 0) or 0
+        anomaly_total = anomaly.get("total_records") or (anomaly_count + normal_count)
+        anomaly_rate = anomaly_count / anomaly_total * 100 if anomaly_total else 0
+
         k1, k2, k3, k4 = st.columns(4, gap="medium")
         with k1:
-            kpi("⛁", "Datasets", f"{len(data):,}", f"✓ {len(data)} loaded", "purple")
+            n_uploaded = len((EVOLUTION_STATE or {}).get("datasets", {}))
+            kpi("⛁", "Datasets", f"{len(data):,}",
+                f"+{n_uploaded} uploaded" if n_uploaded else f"{len(entity_counts)} domains", "purple")
         with k2:
             kpi("▤", "Total Records", f"{record_count:,}", "", "blue")
         with k3:
             kpi("⟲", "Pipeline Success", f"{success_count} / {stage_count}", f"◷ {success_pct}%", "green")
         with k4:
-            kpi("✣", "Graph Entities", f"{entities:,}",
-                "", "gold")
+            # Entities already appear in the ticker and the graph panel, so this card
+            # shows the anomaly result instead.
+            kpi("◬", "Anomalies Flagged", f"{anomaly_count:,}",
+                f"{anomaly_rate:.2f}% rate" if anomaly_total else "", "gold")
+
+        # ---------- Self-Evolving Graph (the framework's key feature) ----------
+        evo = EVOLUTION_STATE or {}
+        evo_cands = evo.get("candidates", [])
+        pending_n = sum(c.get("status") == "pending" for c in evo_cands)
+        accepted_n = sum(c.get("status") == "accepted" for c in evo_cands)
+        rejected_n = sum(c.get("status") == "rejected" for c in evo_cands)
+        evo_hist = evo.get("history", [])
+        with glass_panel("p_evo"):
+            evo_chip = (f'<span class="chip-warn">{pending_n} upload links to review</span>' if pending_n
+                        else '<span class="chip-ok">No upload links waiting</span>')
+            panel_header("⟲", "Self-Evolving Graph", evo_chip)
+            info_col, act_col = st.columns([3, 1], gap="medium", vertical_alignment="center")
+            with info_col:
+                stats_html = "".join(
+                    f'<div class="evo-m"><b>{_esc(str(v))}</b><small>{_esc(k)}</small></div>'
+                    for k, v in [("graph version", f"v{evo.get('version', 0)}"),
+                                 ("uploaded", len(evo.get("datasets", {}))),
+                                 ("accepted", accepted_n), ("rejected", rejected_n),
+                                 ("to review", pending_n)])
+                versions = [h for h in evo_hist if h.get("event") == "DATASET_ADDED"]
+                if versions:
+                    steps = ['<div class="evo-v"><b>v0</b><small>Olist base</small></div>']
+                    shown = versions[-4:]
+                    for i, h in enumerate(shown):
+                        now = ' now' if i == len(shown) - 1 else ''
+                        steps.append('<div class="evo-l"></div>')
+                        steps.append(
+                            f'<div class="evo-v{now}" title="{_esc(str(h.get("dataset", "")))}">'
+                            f'<b>v{_esc(str(h.get("version", "?")))}</b>'
+                            f'<small>+{_esc(str(h.get("dataset", "dataset")))}</small></div>')
+                    timeline = '<div class="evo-tl sm">' + "".join(steps) + '</div>'
+                else:
+                    timeline = ('<div class="evo-hint">At <b>v0</b> (Olist base graph). Add a dataset → review the '
+                                'suggested links → the graph moves to <b>v1</b>.</div>')
+                latest = ""
+                if evo_hist:
+                    last = evo_hist[-1]
+                    latest = (f'<div class="evo-last">Latest: {_esc(evolution_text(last))} · '
+                              f'{_esc(iso_ago(last.get("time")))}</div>')
+                html('<div class="evo-row"><div class="evo-mini">' + stats_html + '</div>' + timeline + '</div>' + latest)
+            with act_col:
+                try:
+                    add_holder = st.container(key="run_btn_evo")
+                except TypeError:
+                    add_holder = st.container()
+                if add_holder.button("⊕  Add dataset", key="evo_add", width="stretch"):
+                    st.session_state.active_page = "Add Dataset"
+                    st.rerun()
+                if pending_n and st.button(f"Review links ({pending_n})", key="evo_review", width="stretch"):
+                    st.session_state.active_page = "Add Dataset"
+                    st.rerun()
 
         left, right = st.columns([1.72, 1], gap="medium")
 
@@ -1704,18 +2257,17 @@ with main_col:
                     if entity_counts:
                         g_col, s_col = st.columns([2.8, 1])
                         with g_col:
-                            st.plotly_chart(make_schema_graph(entity_counts), use_container_width=True,
-                                            config={"displayModeBar": False})
+                            picked = _graph_with_click(make_schema_graph(entity_counts))
                         with s_col:
                             html(
                                 '<div class="kg-stats">'
                                 f'<div class="kg-stat"><div class="kg-ico">✣</div><div><div class="kg-lbl">Entities</div><div class="kg-val">{entities:,}</div></div></div>'
                                 f'<div class="kg-stat"><div class="kg-ico blue">⛓</div><div><div class="kg-lbl">Relationships</div><div class="kg-val">{relationships:,}</div></div></div>'
                                 f'<div class="kg-stat"><div class="kg-ico gold">◈</div><div><div class="kg-lbl">Communities (sample)</div><div class="kg-val">{communities_text}</div></div></div>'
-                                f'<div class="kg-stat"><div class="kg-ico">▦</div><div><div class="kg-lbl">Domains</div><div class="kg-val">{len(entity_counts)}</div></div></div>'
                                 f'<div class="kg-stat"><div class="kg-ico gold">↗</div><div><div class="kg-lbl">Avg. Degree</div><div class="kg-val">{avg_degree:.2f}</div></div></div>'
                                 '</div>'
                             )
+                            html(domain_card_html(picked))
                     else:
                         st.info("Graph entity statistics are not available in the saved pipeline report.")
 
@@ -1796,7 +2348,7 @@ with main_col:
                             if community_rows:
                                 st.dataframe(
                                     community_rows,
-                                    use_container_width=True,
+                                    width="stretch",
                                     hide_index=True,
                                 )
 
@@ -1817,7 +2369,7 @@ with main_col:
                 else:
                     if not data.empty:
                         st.dataframe(data[["Dataset", "Rows", "Columns", "Size (MB)"]], hide_index=True,
-                                     use_container_width=True)
+                                     width="stretch")
                     else:
                         st.info("No processed datasets were found.")
 
@@ -1828,21 +2380,24 @@ with main_col:
                     donut, legend = make_donut(entity_counts, entities)
                     d_col, l_col = st.columns([1.1, 1])
                     with d_col:
-                        st.plotly_chart(donut, use_container_width=True, config={"displayModeBar": False})
+                        st.plotly_chart(donut, config={"displayModeBar": False})
                     with l_col:
                         html(legend)
                 else:
                     st.info("Entity type counts are unavailable.")
 
             with glass_panel("p4"):
-                panel_header("◈", "Recent Discoveries", '<span class="ph-link">View All →</span>')
-                meta = discovery.get("metadata", discovery)
+                scanned = discovery_scan_time(discovery_path, _disc_meta)
+                scan_chip = (f'<span class="chip-q">Scan: {scanned.strftime("%d %b %Y")}</span>'
+                             if scanned else "")
+                panel_header("◈", "Recent Discoveries", scan_chip)
+                meta = _disc_meta
                 if meta:
-                    when = time_ago(discovery_path)
+                    when = f"cross-domain scan · {time_ago(discovery_path)}"
                     rows = [
                         (f"{meta.get('dataset_pair_count', '—')} dataset pairs analysed", when),
                         (f"{meta.get('connected_dataset_pair_count', '—')} connected dataset pairs found", when),
-                        (f"{meta.get('total_relationship_candidates', '—')} relationship candidates to validate", when),
+                        (f"{meta.get('total_relationship_candidates', '—')} relationship hypotheses (scan)", when),
                     ]
                     latest_add = next((h for h in reversed(EVOLUTION_STATE.get("history", []))
                                        if h.get("event") == "DATASET_ADDED"), None)
@@ -1857,9 +2412,27 @@ with main_col:
                     ))
                 else:
                     st.info("No cross-domain discovery report found.")
-                st.caption("Candidates are hypotheses, not verified relationships.")
+                # The pipeline's Discover stage refreshes this scan; the button re-runs just
+                # the scan (seconds) without the full pipeline.
+                if pipeline_report_newer_than(scanned):
+                    st.caption("The pipeline ran after this scan. Re-scan to refresh these numbers.")
+                if st.button("⟳  Re-run cross-domain scan", key="rescan_cd", width="stretch"):
+                    scan_ok = False
+                    with st.spinner("Comparing every pair of Olist datasets…"):
+                        try:
+                            run_cross_domain_scan()
+                            scan_ok = True
+                        except Exception as exc:
+                            st.error(f"Scan failed: {exc}")
+                    if scan_ok:
+                        st.cache_data.clear()
+                        st.rerun()
+                st.caption("Hypotheses are not verified relationships; accepted upload links are shown in "
+                           "Self-Evolving Graph.")
 
-        pipe_col, anomaly_col, insights_col = st.columns([1.65, 1.1, .95], gap="medium")
+        # Pipeline on the left; Anomaly and Insights stacked on the right so there is
+        # no empty gap under a short card.
+        pipe_col, side_col = st.columns([1.65, 1.35], gap="medium")
 
         with pipe_col:
             with glass_panel("p5"):
@@ -1868,100 +2441,40 @@ with main_col:
                 panel_header("▷", "Pipeline Execution", chip)
                 pipeline_panel(stages, last_run, duration, record_count)
 
-        with anomaly_col:
+        with side_col:
             with glass_panel("p6"):
-                panel_header("⊟", "Anomaly Detection", '<span class="ph-link">↗</span>')
-                anomaly_count = anomaly.get("anomaly_count", 0) or 0
-                normal_count = anomaly.get("normal_count", 0) or 0
-                total = anomaly.get("total_records") or (anomaly_count + normal_count)
-                rate = anomaly_count / total * 100 if total else 0
-                c_col, s_col = st.columns([1.6, 1])
-                with c_col:
-                    drawn = False
-                    if ANOMALY_CSV.exists():
-                        try:
-                            frame = read_anomaly_csv(ANOMALY_CSV.stat().st_mtime)
-                            numeric = frame.select_dtypes(include="number").columns.tolist()
-                            if numeric:
-                                chosen = "approval_delay_hours" if "approval_delay_hours" in numeric else numeric[0]
-                                series = frame[chosen].dropna().head(150).reset_index(drop=True)
-                                series = series.rolling(5, min_periods=1).mean()
-                                peak = int(series.idxmax()) if len(series) else 0
-                                trend = go.Figure()
-                                trend.add_trace(go.Scatter(
-                                    y=series, mode="lines", line=dict(color="#b57bff", width=2, shape="spline"),
-                                    fill="tozeroy", fillcolor="rgba(157,107,255,.22)",
-                                    hovertemplate=f"{chosen}: %{{y:,.2f}}<extra></extra>"))
-                                trend.add_trace(go.Scatter(
-                                    x=[peak], y=[series.iloc[peak]] if len(series) else [], mode="markers",
-                                    marker=dict(size=11, color="#ffe3b0", line=dict(color=GOLD, width=3)),
-                                    hoverinfo="skip"))
-                                trend.update_layout(
-                                    height=150, margin=dict(l=0, r=0, t=6, b=0), showlegend=False,
-                                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                    xaxis=dict(visible=False), yaxis=dict(visible=False))
-                                st.plotly_chart(trend, use_container_width=True, config={"displayModeBar": False})
-                                drawn = True
-                        except Exception as exc:
-                            st.caption(f"Anomaly chart unavailable: {exc}")
-                    if not drawn:
-                        st.caption("No investigation CSV found for the trend chart.")
-                with s_col:
-                    html(
-                        '<div class="an-side"><div class="an-lbl">Anomalies</div>'
-                        f'<div class="an-val">{anomaly_count:,}</div>'
-                        '<div class="an-lbl">Anomaly Rate</div>'
-                        f'<div class="an-chip">{rate:.2f}%</div></div>'
-                    )
-                st.caption(f"{normal_count:,} records normal · Anomaly ≠ confirmed fraud.")
+                panel_header("⊟", "Anomaly Detection", f'<span class="an-chip">{anomaly_rate:.2f}% rate</span>'
+                             if anomaly_total else "")
+                drawn = False
+                if ANOMALY_CSV.exists():
+                    try:
+                        trend = anomaly_trend_figure(read_anomaly_csv(ANOMALY_CSV.stat().st_mtime))
+                        if trend is not None:
+                            st.plotly_chart(trend, config={"displayModeBar": False})
+                            drawn = True
+                    except Exception as exc:
+                        st.caption(f"Anomaly chart unavailable: {exc}")
+                if not drawn:
+                    st.caption("No investigation CSV found for the trend chart.")
+                st.caption(f"{anomaly_count:,} of {anomaly_total:,} orders flagged by Isolation Forest · "
+                           f"{normal_count:,} normal · Anomaly ≠ confirmed fraud.")
 
-        with insights_col:
             with glass_panel("p7"):
-                panel_header("✧", "Insights", '<span class="ph-link">View All →</span>')
-                items = []
-                for rel, count in list(relationship_counts.items())[:2]:
-                    items.append((f"{rel.replace('_', ' ').title()} relationships", f"{count:,}"))
-                if anomaly.get("anomaly_count"):
-                    items.append(("Transactional anomalies (Order) detected", f"{anomaly['anomaly_count']:,} events"))
+                panel_header("✧", "Insights")
+                items = [(f"{rel.replace('_', ' ').title()} relationships", f"{count:,}")
+                         for rel, count in sorted(relationship_counts.items(), key=lambda kv: -kv[1])[:2]]
+                if entity_counts:
+                    top_name, top_n = max(entity_counts.items(), key=lambda kv: kv[1])
+                    share = top_n / (sum(entity_counts.values()) or 1) * 100
+                    items.append((f"Largest domain: {top_name}", f"{share:.1f}% of entities"))
                 if items:
                     html("".join(
-                        f'<div class="insight"><div>{t}<b>{v}</b></div><span class="row-arrow">›</span></div>'
+                        f'<div class="insight"><div>{_esc(t)}<b>{_esc(v)}</b></div></div>'
                         for t, v in items[:3]
                     ))
                 else:
                     st.info("Relationship statistics unavailable.")
                 st.caption("Connectivity does not establish causation.")
-
-        evo = EVOLUTION_STATE or {}
-        evo_cands = evo.get("candidates", [])
-        pending_n = sum(c.get("status") == "pending" for c in evo_cands)
-        accepted_n = sum(c.get("status") == "accepted" for c in evo_cands)
-        rejected_n = sum(c.get("status") == "rejected" for c in evo_cands)
-        evo_hist = list(reversed(evo.get("history", [])))[:4]
-        with glass_panel("p_evo"):
-            evo_chip = (f'<span class="chip-warn">{pending_n} links to review</span>' if pending_n
-                        else '<span class="chip-ok">Nothing to review</span>')
-            panel_header("⟲", "Self-Evolving Graph", evo_chip)
-            e1, e2, e3, e4 = st.columns(4)
-            e1.metric("Graph version", f"v{evo.get('version', 0)}")
-            e2.metric("Uploaded datasets", len(evo.get("datasets", {})))
-            e3.metric("Accepted links", accepted_n)
-            e4.metric("Rejected links", rejected_n)
-            if evo_hist:
-                html("".join(
-                    f'<div class="row"><div class="row-ico">⟲</div><div class="row-main">'
-                    f'{_esc(evolution_text(h))}<small>{_esc(iso_ago(h.get("time")))}</small></div></div>'
-                    for h in evo_hist
-                ))
-            else:
-                st.info("No uploads yet. Add a dataset and watch the graph evolve.")
-            b1, b2, _spacer = st.columns([1, 1, 4])
-            if b1.button("Review links", key="evo_review", use_container_width=True):
-                st.session_state.active_page = "Add Dataset"
-                st.rerun()
-            if b2.button("Add dataset", key="evo_add", type="primary", use_container_width=True):
-                st.session_state.active_page = "Add Dataset"
-                st.rerun()
 
     
     # =================== ADD DATASET ===================
@@ -2130,7 +2643,7 @@ with main_col:
                         st.markdown("#### Dataset preview")
                         st.dataframe(
                             page_data,
-                            use_container_width=True,
+                            width="stretch",
                             height=420
                         )
 
@@ -2156,7 +2669,7 @@ with main_col:
                             ),
                             mime="text/csv",
                             disabled=too_big,
-                            use_container_width=False
+                            width="content"
                         )
 
 
@@ -2246,7 +2759,7 @@ with main_col:
 
                 st.plotly_chart(
                     fig,
-                    use_container_width=True,
+                    width="stretch",
                     config={"displayModeBar": False}
                 )
 
@@ -2401,7 +2914,7 @@ with main_col:
             if not pair_df.empty:
                 st.dataframe(
                     pair_df,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     height=350
                 )
@@ -2440,19 +2953,19 @@ with main_col:
         if entity_counts:
             with glass_panel("p10"):
                 panel_header("✣", "Schema Constellation")
-                st.plotly_chart(make_schema_graph(entity_counts), use_container_width=True,
+                st.plotly_chart(make_schema_graph(entity_counts),
                                 config={"displayModeBar": False})
         left, right = st.columns(2, gap="medium")
         with left:
             with glass_panel("p11"):
                 panel_header("◈", "Entity types")
                 st.dataframe(pd.DataFrame([{"Entity": k, "Count": v} for k, v in entity_counts.items()]),
-                             hide_index=True, use_container_width=True)
+                             hide_index=True, width="stretch")
         with right:
             with glass_panel("p12"):
                 panel_header("⛓", "Relationship types")
                 st.dataframe(pd.DataFrame([{"Relationship": k, "Count": v} for k, v in relationship_counts.items()]),
-                             hide_index=True, use_container_width=True)
+                             hide_index=True, width="stretch")
         st.info("The complete graph is large. The dashboard displays aggregate statistics to keep the browser responsive.")
 
     # ====================== INTELLIGENCE ====================
@@ -2464,7 +2977,7 @@ with main_col:
         with b:
             kpi("◬", "Anomalies Flagged", f'{anomaly.get("anomaly_count", 0):,}', "Investigate", "gold")
         with c:
-            kpi("⚙", "Detection Method", anomaly.get("method", "—"), "Unsupervised", "purple")
+            kpi("⚙", "Detection Method", anomaly.get("method", "—"), "Unsupervised", "purple text")
         with glass_panel("p13"):
             panel_header("✧", "Model details")
             st.write("**Features:** " + (", ".join(anomaly.get("features", [])) or "Not available"))
@@ -2472,269 +2985,11 @@ with main_col:
             if ANOMALY_CSV.exists():
                 with st.expander("Preview investigated records"):
                     frame = read_anomaly_csv(ANOMALY_CSV.stat().st_mtime)
-                    st.dataframe(frame.head(100), use_container_width=True)
+                    st.dataframe(frame.head(100), width="stretch")
                     st.download_button("Download anomaly results", ANOMALY_CSV.read_bytes(),
                                        file_name=ANOMALY_CSV.name, mime="text/csv")
 
     # =================== AI ASSISTANT ====================
-    elif page == "AI Assistant":
-        import os
-        from datetime import datetime as _dt
-
-        page_header("AI Assistant", "Chat with an AI that knows your knowledge graph, anomalies and pipeline.")
-
-        # ---- session state init ----
-        if "chat_messages" not in st.session_state:
-            st.session_state.chat_messages = []
-        if "chat_api_key" not in st.session_state:
-            st.session_state.chat_api_key = os.environ.get("GEMINI_API_KEY", "")
-        if "chat_model" not in st.session_state:
-            st.session_state.chat_model = "gemini-2.0-flash"
-        if "chat_nonce" not in st.session_state:
-            st.session_state.chat_nonce = 0
-
-        # ---- build context from live project data ----
-        def build_system_context():
-            ctx_parts = [
-                "You are an expert AI assistant embedded in the Cross-Domain Intelligence Platform.",
-                "You help users understand their knowledge graph, anomaly detection results, pipeline "
-                "execution and cross-domain data discovery findings.",
-                "",
-                "=== LIVE PROJECT CONTEXT ===",
-                f"• Total entities in Knowledge Graph: {entities:,}",
-                f"• Total relationships: {relationships:,}",
-                f"• Entity types: {', '.join(entity_counts.keys()) if entity_counts else 'Not available'}",
-                f"• Pipeline status: {status} ({success_count}/{stage_count} stages successful)",
-                f"• Last pipeline run: {last_run or 'Not available'}",
-                f"• Anomalies detected: {anomaly.get('anomaly_count', 0):,} "
-                  f"(rate: {(anomaly.get('anomaly_count', 0) / max(anomaly.get('total_records', 1), 1) * 100):.2f}%)",
-                f"• Anomaly detection method: {anomaly.get('method', 'Isolation Forest')}",
-                f"• Processed datasets: {len(data)} ({record_count:,} total records)",
-                f"• Avg graph degree: {avg_degree:.2f}",
-            ]
-            if discovery:
-                meta = discovery.get("metadata", discovery)
-                ctx_parts += [
-                    f"• Discovery: {meta.get('total_relationship_candidates', 0)} relationship candidates found "
-                    f"across {meta.get('dataset_pair_count', 0)} dataset pairs",
-                ]
-            ctx_parts += [
-                "",
-                "Answer questions about the data, suggest analysis approaches, explain anomalies, "
-                "and help interpret the knowledge graph. Be concise but thorough. "
-                "Use markdown formatting in your responses.",
-            ]
-            return "\n".join(ctx_parts)
-
-        SUGGESTIONS = [
-            "What do the anomaly detection results mean?",
-            "Explain the Knowledge Graph structure",
-            "Which pipeline stages succeeded?",
-            "What are cross-domain relationship candidates?",
-            "How is Isolation Forest used here?",
-            "Summarize the project findings",
-        ]
-
-        # ---- top layout: config sidebar + chat ----
-        cfg_col, chat_col = st.columns([1, 2.6], gap="medium")
-
-        with cfg_col:
-            with glass_panel("ai_cfg"):
-                html('<div class="chat-header"><div class="chat-status"></div>'
-                     '<div style="flex:1"><div style="font:600 16px \'Exo 2\',sans-serif;color:#fff">AI Assistant</div>'
-                     '<div style="font-size:12px;color:#9a9fae">Powered by Gemini</div></div></div>')
-
-                api_key = st.text_input(
-                    "Gemini API Key",
-                    value=st.session_state.chat_api_key,
-                    type="password",
-                    placeholder="AIza...",
-                    help="Get your key from https://aistudio.google.com",
-                    key="ai_api_key_input",
-                )
-                if api_key != st.session_state.chat_api_key:
-                    st.session_state.chat_api_key = api_key
-
-                model_choice = st.selectbox(
-                    "Model",
-                    ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash-preview-05-20"],
-                    index=["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash-preview-05-20"].index(
-                        st.session_state.chat_model
-                    ) if st.session_state.chat_model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash-preview-05-20"] else 0,
-                    key="ai_model_select",
-                )
-                st.session_state.chat_model = model_choice
-
-                st.markdown("---")
-                html('<div style="font:600 13px \'Exo 2\',sans-serif;color:#e9b765;margin-bottom:8px">📊 Live Context</div>')
-                ctx_pills = [
-                    (f"{entities:,} entities", "#9d6bff"),
-                    (f"{relationships:,} edges", "#4f86ff"),
-                    (f"{anomaly.get('anomaly_count', 0):,} anomalies", "#ff5d6c"),
-                    (f"{len(data)} datasets", "#3fd68a"),
-                    (f"{success_count}/{stage_count} stages", "#e9b765"),
-                ]
-                html("".join(
-                    f'<span class="context-pill"><span class="dot" style="background:{c}"></span>{label}</span>'
-                    for label, c in ctx_pills
-                ))
-
-                st.markdown("---")
-                if st.button("🗑 Clear Chat", use_container_width=True, key="ai_clear_chat"):
-                    st.session_state.chat_messages = []
-                    st.rerun()
-
-                st.caption("Your API key is only stored in session memory and never sent anywhere except the Gemini API.")
-
-        with chat_col:
-            with glass_panel("ai_chat"):
-                # -- suggestions (only when no history) --
-                if not st.session_state.chat_messages:
-                    html('<div style="font:600 14px \'Exo 2\',sans-serif;color:#e9b765;margin-bottom:10px">✦ Try asking…</div>')
-                    sug_cols = st.columns(2)
-                    for i, sug in enumerate(SUGGESTIONS):
-                        with sug_cols[i % 2]:
-                            if st.button(sug, key=f"sug_{i}", use_container_width=True):
-                                st.session_state.pending_prompt = sug
-                                st.rerun()
-                    st.markdown("---")
-
-                # -- render message history --
-                if st.session_state.chat_messages:
-                    bubbles_html = '<div class="chat-wrap">'
-                    for msg in st.session_state.chat_messages:
-                        role = msg["role"]
-                        content = msg["content"]
-                        time_str = msg.get("time", "")
-                        if role == "user":
-                            bubbles_html += (
-                                f'<div class="chat-msg user">'
-                                f'<div class="chat-avatar user">JR</div>'
-                                f'<div>'
-                                f'<div class="chat-bubble user">{_esc(content)}</div>'
-                                f'<div class="chat-time" style="text-align:right">{time_str}</div>'
-                                f'</div></div>'
-                            )
-                        else:
-                            # render AI markdown properly via st.markdown
-                            bubbles_html += (
-                                f'<div class="chat-msg">'
-                                f'<div class="chat-avatar ai">✦</div>'
-                                f'<div>'
-                                f'<div class="chat-bubble ai">'
-                            )
-                            html(bubbles_html)
-                            bubbles_html = ""
-                            st.markdown(content)
-                            html(f'</div><div class="chat-time">{time_str}</div></div></div>')
-                    if bubbles_html:
-                        html(bubbles_html + '</div>')
-                    else:
-                        html('</div>')
-
-                # -- input row --
-                st.markdown("")
-                inp_col, btn_col = st.columns([5, 1], gap="small")
-                with inp_col:
-                    user_input = st.text_input(
-                        "Message",
-                        placeholder="Ask about your knowledge graph, anomalies, pipeline…",
-                        label_visibility="collapsed",
-                        key=f"ai_chat_input_{st.session_state.chat_nonce}",
-                    )
-                with btn_col:
-                    send_clicked = st.button("Send ›", type="primary", use_container_width=True, key="ai_send_btn")
-
-                # -- process send --
-                pending_prompt = st.session_state.pop("pending_prompt", None)
-                prompt_text = (pending_prompt or user_input or "").strip()
-                if (pending_prompt or send_clicked or user_input) and prompt_text:
-                    if not st.session_state.chat_api_key.strip():
-                        st.warning("⚠ Please enter your Gemini API key in the left panel to start chatting.")
-                    else:
-                        # append user message
-                        st.session_state.chat_messages.append({
-                            "role": "user",
-                            "content": prompt_text,
-                            "time": _dt.now().strftime("%H:%M"),
-                        })
-
-                        # call Gemini API
-                        with st.spinner("✦ Thinking…"):
-                            try:
-                                import urllib.request as _req
-                                import urllib.error as _uerr
-
-                                # Build Gemini API request (REST, no extra SDK needed)
-                                api_key_val = st.session_state.chat_api_key.strip()
-                                model_val = st.session_state.chat_model
-
-                                system_ctx = build_system_context()
-
-                                # Build conversation history for multi-turn
-                                gem_contents = []
-                                # inject system context as first user turn
-                                gem_contents.append({
-                                    "role": "user",
-                                    "parts": [{"text": f"[SYSTEM CONTEXT - read and remember, do not repeat back]\n{system_ctx}"}]
-                                })
-                                gem_contents.append({
-                                    "role": "model",
-                                    "parts": [{"text": "Understood. I'm ready to help you explore your Cross-Domain Intelligence Platform."}]
-                                })
-
-                                for msg in st.session_state.chat_messages:
-                                    gem_contents.append({
-                                        "role": "user" if msg["role"] == "user" else "model",
-                                        "parts": [{"text": msg["content"]}]
-                                    })
-
-                                payload = json.dumps({
-                                    "contents": gem_contents,
-                                    "generationConfig": {
-                                        "temperature": 0.7,
-                                        "maxOutputTokens": 1024,
-                                    }
-                                }).encode("utf-8")
-
-                                url = (
-                                    f"https://generativelanguage.googleapis.com/v1beta/models/"
-                                    f"{model_val}:generateContent?key={api_key_val}"
-                                )
-                                req = _req.Request(
-                                    url, data=payload,
-                                    headers={"Content-Type": "application/json"},
-                                    method="POST",
-                                )
-                                with _req.urlopen(req, timeout=30) as resp:
-                                    result_data = json.loads(resp.read().decode("utf-8"))
-
-                                reply_text = (
-                                    result_data
-                                    .get("candidates", [{}])[0]
-                                    .get("content", {})
-                                    .get("parts", [{}])[0]
-                                    .get("text", "No response received.")
-                                )
-
-                            except Exception as exc:
-                                reply_text = (
-                                    f"⚠ **Error communicating with Gemini API**\n\n"
-                                    f"```\n{type(exc).__name__}: {exc}\n```\n\n"
-                                    "Please check:\n"
-                                    "- Your API key is valid\n"
-                                    "- You have internet connectivity\n"
-                                    "- The model name is correct"
-                                )
-
-                        st.session_state.chat_messages.append({
-                            "role": "assistant",
-                            "content": reply_text,
-                            "time": _dt.now().strftime("%H:%M"),
-                        })
-                        st.session_state.chat_nonce += 1      # fresh, empty input box
-                        st.rerun()
-
     # ========================= REPORTS ======================
     elif page == "Reports":
         page_header("Reports & Audit", "Saved outputs from the backend pipeline.")
@@ -2761,3 +3016,6 @@ with main_col:
                 ))
             else:
                 st.info("No log files found.")
+
+    # ================= FLOATING CHAT BOX (every page) =================
+    render_chat_box(chat_facts())

@@ -6,3 +6,7 @@ toolbarMode = "minimal"
 
 [server]
 headless = true
+
+[theme]
+# Gold accent for toggles, sliders and other built-in widgets (the default is red).
+primaryColor = "#e9b765"

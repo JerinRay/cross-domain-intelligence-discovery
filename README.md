@@ -51,16 +51,24 @@ The framework will contain the following major modules:
 
 ## 5. Dataset Sources
 
-Initial experimental datasets:
+**Implemented and evaluated: Brazilian E-Commerce (Olist).** Its seven linked tables are
+treated as separate domains: Customers, Orders, Order Items, Products, Sellers, Payments
+and Reviews (plus Geolocation for inventory). Cross-domain discovery, the knowledge graph,
+anomaly detection and NLP all run on these tables.
+
+Any further dataset (CSV, JSON, Parquet or Excel) can be added at run time through the
+dashboard's **Add Dataset** page; the self-evolving graph then proposes links to it.
+
+Planned for future evaluation (not yet implemented):
 
 | Dataset | Domain |
 |---|---|
-| Brazilian E-Commerce (Olist) | E-commerce |
 | Online Retail II | Retail |
 | Credit Card Fraud Detection | Financial transactions |
 | 20 Newsgroups | Text and document classification |
 
-These datasets are independent. Cross-domain relationships will be treated as hypotheses unless supported by evidence; unrelated records will not be artificially joined.
+Cross-domain relationships are treated as hypotheses unless supported by evidence;
+unrelated records are not artificially joined.
 
 ## 6. Technology Stack
 
@@ -81,11 +89,13 @@ These datasets are independent. Cross-domain relationships will be treated as hy
 ### Graph Processing
 - NetworkX
 
+### Visualization
+- Streamlit (dashboard)
+- Plotly
+
 ### Planned Extensions
-- NLP and text embeddings
-- Vector search
+- Text embeddings and vector search
 - FastAPI
-- Streamlit
 - PostgreSQL
 
 ## 7. Expected Outcomes
@@ -102,9 +112,23 @@ The expected outcome is a modular research prototype that can:
 
 ## 8. Development Status
 
-**Current stage:** Environment setup and project architecture.
+Implemented: ingestion, data understanding, join-key and cross-domain discovery,
+Isolation Forest anomaly detection, review-text NLP, knowledge graph (build, validate,
+export, SQLite search index, community detection), explainability, the self-evolving
+graph (upload → link candidates → accept/reject → new graph version) and the Streamlit
+dashboard.
 
-Implementation and experimental validation are pending.
+### How to run
+
+1. Install dependencies: `pip install -r requirements.txt`
+   then the spaCy NER model: `python -m spacy download xx_ent_wiki_sm`
+2. Download the [Olist dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+   and unzip the CSV files into `datasets/raw/olist/`.
+3. Run the pipeline from the project root: `python -m src.pipeline.run`
+4. Start the dashboard from the project root: `streamlit run frontend/app.py`
+
+Run the tests with `python -m pytest`.
+
 
 ## 9. Project Structure
 

@@ -1,4 +1,4 @@
-
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +9,8 @@ from src.ingestion.data_loader import run_ingestion_pipeline
 
 from src.data_understanding.engine import DataUnderstandingEngine
 from src.discovery.engine import DiscoveryEngine
+from src.discovery.cross_domain_pattern_engine import CrossDomainPatternEngine
+from src.discovery.olist_datasets import load_scan_frames
 
 from src.anomaly_detection.feature_builder import EcommerceFeatureBuilder
 from src.anomaly_detection.isolation_forest_detector import IsolationForestDetector
@@ -26,7 +28,9 @@ from src.knowledge_graph.search_index import KnowledgeGraphSearchIndex
 # PROJECT PATHS
 # --------------------------------------------------
 
-PROJECT_ROOT = Path.cwd()
+# Anchored to this file, so the pipeline works no matter which folder it is
+# started from (main() also switches into the project root).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 PROCESSED_DIR = PROJECT_ROOT / "datasets" / "processed" / "olist"
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -57,6 +61,9 @@ def check_dataset(path):
 
 
 def main():
+
+    # every relative path below (datasets/raw, logs/...) is relative to the project root
+    os.chdir(PROJECT_ROOT)
 
     ensure_directories()
 
@@ -151,6 +158,15 @@ def main():
             output_dir=str(PIPELINE_LOG_DIR / "data_discovery")
         )
 
+        # All-pairs cross-domain scan over the seven Olist tables, so one pipeline
+        # run also refreshes "Recent Discoveries" on the dashboard.
+        scan_engine = CrossDomainPatternEngine(sample_size=3000)
+        scan = scan_engine.analyze(load_scan_frames(max_rows=5000))
+        scan_path = scan_engine.save_report(
+            scan,
+            output_dir=str(LOG_DIR / "cross_domain")
+        )
+
         return {
             "datasets": [
                 "olist_orders",
@@ -159,7 +175,11 @@ def main():
             "orders_rows": len(orders),
             "order_items_rows": len(order_items),
             "discovery_status": report["status"],
-            "report_path": str(report_path)
+            "report_path": str(report_path),
+            "cross_domain_dataset_pairs": scan["dataset_pair_count"],
+            "cross_domain_connected_pairs": scan["connected_dataset_pair_count"],
+            "cross_domain_hypotheses": scan["total_relationship_candidates"],
+            "cross_domain_report_path": str(scan_path)
         }
 
     pipeline.execute_stage(

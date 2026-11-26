@@ -22,45 +22,6 @@ def _save_upload(root, uploaded):
     return dest
 
 
-_fragment = getattr(st, "fragment", None) or getattr(st, "experimental_fragment", None) or (lambda f: f)
-
-
-def _rerun_fragment():
-    try:
-        st.rerun(scope="fragment")      # only this list refreshes, not the whole dashboard
-    except TypeError:
-        st.rerun()
-
-
-@_fragment
-def _review_fragment(up):
-    up.state = up._load_state()
-    pending = up.list_candidates("pending")
-    st.caption("Candidates are hypotheses, not verified relationships. "
-               "Your choices improve scoring on later uploads.")
-    if not pending:
-        st.success("Nothing waiting for review.")
-        return
-    st.caption(f"{len(pending)} waiting for review")
-    for cand in pending[:25]:
-        with st.container(border=True):
-            left, right = st.columns([4, 1.4])
-            left.markdown(
-                f"**{cand['dataset_a']}.{cand['column_a']}** → "
-                f"**{cand['dataset_b']}.{cand['column_b']}**  \n"
-                f"{cand['confidence']} · score {cand['score']} · {cand['evidence']}"
-                + ("  \n_boosted by an earlier accepted link_" if cand["learned_boost"] else ""))
-            a_col, r_col = right.columns(2)
-            if a_col.button("Accept", key=f"acc_{cand['id']}"):
-                up.decide(cand["id"], True)
-                _rerun_fragment()
-            if r_col.button("Reject", key=f"rej_{cand['id']}"):
-                up.decide(cand["id"], False)
-                _rerun_fragment()
-    if len(pending) > 25:
-        st.caption(f"Showing top 25 of {len(pending)}.")
-
-
 def render_add_dataset(root):
     up = _updater(str(root))
     up.state = up._load_state()          # pick up changes made in earlier reruns
@@ -100,7 +61,6 @@ def render_add_dataset(root):
                             progress=lambda stage, pct: bar.progress(int(pct), text=f"{stage}..."))
                         bar.progress(100, text="Done")
                         st.session_state["last_diff"] = diff
-                        st.cache_data.clear()      # refresh cached dataset inventory
                     except Exception as exc:      # clear message instead of a stack trace
                         bar.empty()
                         st.error(f"Could not add dataset: {exc}")
@@ -125,7 +85,26 @@ def render_add_dataset(root):
 
     # ================= REVIEW =================
     with tab_review:
-        _review_fragment(up)
+        pending = up.list_candidates("pending")
+        st.caption("Candidates are hypotheses, not verified relationships. "
+                   "Your choices improve scoring on later uploads.")
+        if not pending:
+            st.success("Nothing waiting for review.")
+        for cand in pending[:25]:
+            with st.container(border=True):
+                left, right = st.columns([4, 1.4])
+                left.markdown(
+                    f"**{cand['dataset_a']}.{cand['column_a']}** → "
+                    f"**{cand['dataset_b']}.{cand['column_b']}**  \n"
+                    f"{cand['confidence']} · score {cand['score']} · {cand['evidence']}"
+                    + ("  \n_boosted by an earlier accepted link_" if cand["learned_boost"] else ""))
+                a, r = right.columns(2)
+                if a.button("Accept", key=f"acc_{cand['id']}"):
+                    up.decide(cand["id"], True); st.rerun()
+                if r.button("Reject", key=f"rej_{cand['id']}"):
+                    up.decide(cand["id"], False); st.rerun()
+        if len(pending) > 25:
+            st.caption(f"Showing top 25 of {len(pending)}.")
 
     # ================= HISTORY =================
     with tab_history:
@@ -141,6 +120,5 @@ def render_add_dataset(root):
             target = st.selectbox("Undo an uploaded dataset", uploaded_names)
             if st.button("Roll back this dataset"):
                 up.rollback_dataset(target)
-                st.cache_data.clear()
                 st.session_state.pop("last_diff", None)
                 st.rerun()

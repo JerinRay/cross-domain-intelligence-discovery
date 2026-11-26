@@ -1,63 +1,33 @@
-
-from pathlib import Path
-
-import pandas as pd
-
 from src.discovery.cross_domain_pattern_engine import (
     CrossDomainPatternEngine
 )
+from src.discovery.olist_datasets import PROJECT_ROOT, load_scan_frames
 
 
 def main():
-    data_dir = Path("datasets/processed")
-
-    dataset_files = {
-        "customers": "olist_customers_dataset.parquet",
-        "orders": "olist_orders_dataset.parquet",
-        "order_items": "olist_order_items_dataset.parquet",
-        "products": "olist_products_dataset.parquet",
-        "sellers": "olist_sellers_dataset.parquet",
-        "payments": "olist_order_payments_dataset.parquet",
-        "reviews": "olist_order_reviews_dataset.parquet",
-    }
-
-    datasets = {}
-
     print("=" * 65)
     print("OLIST CROSS-DOMAIN PATTERN DISCOVERY")
     print("=" * 65)
 
-    for name, filename in dataset_files.items():
-        filepath = data_dir / filename
+    # Reads datasets/processed/olist/ (where ingestion writes) and falls back to
+    # datasets/processed/.  Each table is sampled to 5,000 rows so the pairwise
+    # analysis stays fast on a laptop.
+    datasets = load_scan_frames(max_rows=5000, random_state=42)
 
-        if not filepath.exists():
-            raise FileNotFoundError(
-                f"Dataset not found: {filepath}"
-            )
-
-        dataframe = pd.read_parquet(filepath)
-
+    for name, dataframe in datasets.items():
         print(
-            f"{name}: {len(dataframe):,} rows, "
+            f"{name}: {len(dataframe):,} sampled rows, "
             f"{len(dataframe.columns)} columns"
         )
-
-        # Use a reproducible sample to keep pairwise analysis
-        # manageable on a local MacBook.
-        if len(dataframe) > 5000:
-            dataframe = dataframe.sample(
-                n=5000,
-                random_state=42
-            )
-
-        datasets[name] = dataframe
 
     print("\nRunning cross-domain analysis...")
 
     engine = CrossDomainPatternEngine(sample_size=3000)
     report = engine.analyze(datasets)
 
-    output_path = engine.save_report(report)
+    output_path = engine.save_report(
+        report, output_dir=str(PROJECT_ROOT / "logs" / "cross_domain")
+    )
 
     print("\n" + "=" * 65)
     print("CROSS-DOMAIN ANALYSIS RESULTS")

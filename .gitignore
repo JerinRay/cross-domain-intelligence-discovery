@@ -22,18 +22,16 @@ env/
 # Operating system
 .DS_Store
 
-# Logs
+# Logs and pipeline outputs
 logs/
 *.log
 
 # Temporary files
 *.tmp
 
+# Data (download the Olist dataset into datasets/raw/olist/ - see README)
 datasets/raw/
 datasets/processed/
 
-# Logs
-logs/
-*.log
-
-datasets/processed/%
+# Runtime state of the self-evolving graph (uploads, link decisions)
+knowledge_base/
