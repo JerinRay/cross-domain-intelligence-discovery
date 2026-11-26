@@ -4,7 +4,11 @@ import json
 import math
 import re
 import sqlite3
+import os
+import shutil
+import subprocess
 import sys
+import time as _time
 from html import escape as _esc
 
 import pandas as pd
@@ -70,9 +74,52 @@ NAV_ITEMS = {
     "AI Assistant": "✦",
 }
 
+# ---------------- colour themes ----------------
+# Every gold/amber tone in the stylesheet is rotated to the chosen hue (lightness and
+# saturation are kept), so one switch restyles the whole dashboard.
+THEMES = {"Aurora Gold": None, "Neon Violet": 272, "Ocean Teal": 184, "Emerald": 150, "Rose Quartz": 338}
+THEME_NAME = st.session_state.get("theme", "Aurora Gold")
+if THEME_NAME not in THEMES:
+    THEME_NAME = "Aurora Gold"
+THEME_HUE = THEMES[THEME_NAME]
+
+_HEX_RE = re.compile(r"#([0-9a-fA-F]{6})\b")
+_RGBA_RE = re.compile(r"rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})")
+
+
+def _shift_rgb(r, g, b, hue):
+    import colorsys
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    deg = h * 360
+    if not (18 <= deg <= 58 and s > 0.25):          # only gold/amber tones move
+        return None
+    nr, ng, nb = colorsys.hls_to_rgb(((hue + (deg - 38) * 0.5) % 360) / 360, l, s)
+    return round(nr * 255), round(ng * 255), round(nb * 255)
+
+
+def retheme_css(css, hue):
+    if hue is None:
+        return css
+
+    def hex_sub(m):
+        v = m.group(1)
+        out = _shift_rgb(int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16), hue)
+        return m.group(0) if out is None else "#%02x%02x%02x" % out
+
+    def rgba_sub(m):
+        out = _shift_rgb(int(m.group(1)), int(m.group(2)), int(m.group(3)), hue)
+        return m.group(0) if out is None else "rgba(%d,%d,%d" % out
+
+    return _RGBA_RE.sub(rgba_sub, _HEX_RE.sub(hex_sub, css))
+
+
+def themed_css(hue):
+    return retheme_css(_BASE_CSS, hue)
+
+
 # Palette shared by CSS and Plotly
-GOLD = "#e9b765"
-GOLD_DEEP = "#b8873a"
+GOLD = retheme_css("#e9b765", THEME_HUE)
+GOLD_DEEP = retheme_css("#b8873a", THEME_HUE)
 PURPLE = "#9d6bff"
 BLUE = "#4f86ff"
 TEAL = "#22c3d6"
@@ -83,7 +130,7 @@ MUTED = "#9a9fae"
 
 # ------------------------- CSS ----------------------------
 
-st.markdown("""
+_BASE_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700;800&display=swap');
 :root{
@@ -519,8 +566,84 @@ div[data-testid="stRadio"] label p{font-size:16.5px!important}
   font-size:12px;color:#c9c5bb;margin:3px}
 .context-pill .dot{width:6px;height:6px;border-radius:50%}
 
+
+/* =================== LIVE TICKER + POLISH =================== */
+.ticker{overflow:hidden;border:1px solid var(--line);border-radius:999px;padding:9px 0;margin:2px 0 16px;
+  background:linear-gradient(90deg,rgba(233,183,101,.10),rgba(255,255,255,.03) 50%,rgba(233,183,101,.10))}
+.ticker-track{display:flex;width:max-content;animation:tick 46s linear infinite;will-change:transform}
+.ticker:hover .ticker-track{animation-play-state:paused}
+.tk{display:flex;align-items:center;gap:9px;padding-right:46px;font-size:15px;color:#e9e4d8;white-space:nowrap}
+.tk i{width:7px;height:7px;border-radius:50%;background:#e9b765;box-shadow:0 0 8px rgba(233,183,101,.7)}
+.tk b{color:#fff;font-weight:600}
+@keyframes tick{to{transform:translateX(-50%)}}
+.kpi{transition:transform .22s ease}
+.kpi:hover{transform:translateY(-3px)}
+div[data-testid="stVerticalBlockBorderWrapper"],[class*="st-key-glass"]{transition:border-color .25s ease}
+div[data-testid="stVerticalBlockBorderWrapper"]:hover,[class*="st-key-glass"]:hover{border-color:rgba(233,183,101,.40)!important}
+.an-val{font-size:clamp(24px,1.8vw,34px)!important;white-space:nowrap}
+
+/* clickable stage pills + run button */
+[class*="st-key-stage_row"] [data-testid="stButton"]{margin:0}
+[class*="st-key-stage_row"] button{min-height:40px!important;padding:4px 6px!important;border-radius:999px!important;
+  justify-content:center!important;border:1px solid rgba(255,255,255,.16)!important;background:rgba(255,255,255,.04)!important;
+  transition:transform .18s ease,border-color .18s ease}
+[class*="st-key-stage_row"] button:hover{transform:translateY(-2px);border-color:rgba(233,183,101,.6)!important}
+[class*="st-key-stage_row"] button p{font-size:14px!important;text-align:center!important;width:100%!important;
+  white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important}
+[class*="st-key-stage_row"] button[kind="primary"]{background:linear-gradient(135deg,#e7b866,#b98538)!important;
+  border-color:rgba(255,220,160,.75)!important}
+[class*="st-key-stage_row"] button[kind="primary"] p{color:#1d1406!important;font-weight:600}
+[class*="st-key-run_btn"] [data-testid="stButton"]{display:flex;justify-content:flex-start}
+[class*="st-key-run_btn"] button{width:auto!important;min-height:46px!important;padding:0 24px!important;border-radius:999px!important;
+  justify-content:center!important;background:linear-gradient(135deg,#e7b866,#b98538)!important;
+  border:1px solid rgba(255,220,160,.75)!important;box-shadow:0 6px 20px rgba(233,183,101,.28)!important}
+[class*="st-key-run_btn"] button p{width:auto!important;text-align:center!important;color:#1d1406!important;font-weight:700;font-size:16px!important}
+
+/* pipeline flow diagram */
+.pf{display:flex;align-items:flex-start;padding:14px 4px 10px;overflow-x:auto}
+.pf-node{display:flex;flex-direction:column;align-items:center;flex:0 0 auto}
+.pf-ring{position:relative;width:62px;height:62px;border-radius:50%;display:grid;place-items:center;
+  border:2px solid rgba(255,255,255,.18);background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.14),rgba(255,255,255,.03))}
+.pf-ring svg{width:28px;height:28px;stroke:#e6e2d8;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.pf-name{margin-top:8px;font-size:13.5px;color:#e6e2d8;white-space:nowrap;text-align:center}
+.pf-node.cap .pf-ring{width:50px;height:50px;border-style:dashed;margin-top:6px}
+.pf-node.cap svg{width:23px;height:23px;stroke:#a7a399}
+.pf-node.cap .pf-name{color:#a7a399;margin-top:6px}
+.pf-node.done .pf-ring{border-color:rgba(63,214,138,.75);background:rgba(63,214,138,.10)}
+.pf-node.done:not(.cap) svg{stroke:#7ff0b4}
+.pf-node.running .pf-ring{border-color:#e9b765;background:rgba(233,183,101,.14);animation:pfpulse 1.5s ease-out infinite}
+.pf-node.running svg{stroke:#f5cd86}
+.pf-node.failed .pf-ring{border-color:#ff5d6c;background:rgba(255,93,108,.12)}
+.pf-node.failed svg{stroke:#ff8a94}
+.pf-node.queued{opacity:.5}
+.pf-node.sel .pf-ring{box-shadow:0 0 0 4px rgba(233,183,101,.28)}
+.pf-node.sel .pf-name{color:#f3cd85;font-weight:600}
+.pf-badge{position:absolute;right:-4px;bottom:-3px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+  font-size:12px;font-weight:700;color:#06120b;background:#3fd68a;border:2px solid #101118}
+.pf-badge.bad{background:#ff5d6c;color:#fff}
+.pf-link{flex:1 1 14px;min-width:10px;height:3px;margin-top:30px;border-radius:2px;background:rgba(255,255,255,.12)}
+.pf-link.done{background:linear-gradient(90deg,rgba(63,214,138,.85),rgba(63,214,138,.55))}
+.pf-link.flow{background:repeating-linear-gradient(90deg,#e9b765 0 9px,transparent 9px 18px);background-size:18px 3px;
+  animation:pfflow .55s linear infinite}
+@keyframes pfflow{to{background-position:18px 0}}
+@keyframes pfpulse{0%{box-shadow:0 0 0 0 rgba(233,183,101,.55)}100%{box-shadow:0 0 0 14px rgba(233,183,101,0)}}
+.chip-q{font-size:14px;color:#a7a399;border:1px solid rgba(255,255,255,.14);padding:3px 10px;border-radius:8px}
+.chip-bad{font-size:14px;color:#ff5d6c;border:1px solid rgba(255,93,108,.45);background:rgba(255,93,108,.08);padding:3px 10px;border-radius:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px}
+.stage-detail{border:1px solid var(--line2);border-radius:14px;padding:14px 16px;margin:12px 0 6px;background:rgba(255,255,255,.03)}
+.stage-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.stage-name{font:600 20px 'Exo 2',system-ui,sans-serif;color:#fff}
+.stage-desc{font-size:15px;color:#cfcabd;margin-bottom:12px;line-height:1.5}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:start}
+.kv-i.long{grid-column:1/-1}
+.kv-i.long b{font-size:15px;word-break:break-all}
+.kv-i{background:rgba(255,255,255,.04);border:1px solid var(--line2);border-radius:10px;padding:8px 12px;min-width:0}
+.kv-i small{display:block;color:#a7a399;font-size:13px;text-transform:capitalize}
+.kv-i b{color:#fff;font-weight:600;font-size:17px;word-break:break-word}
+
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(themed_css(THEME_HUE), unsafe_allow_html=True)
 
 
 def wave_background():
@@ -555,7 +678,7 @@ def wave_background():
         '<feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'
         '<g filter="url(#glow)">' + "".join(top) + "".join(bottom) + "</g></svg></div>"
     )
-    st.markdown(svg, unsafe_allow_html=True)
+    st.markdown(retheme_css(svg, THEME_HUE), unsafe_allow_html=True)
 
 
 SMOOTH = st.session_state.get("smooth_mode", True)
@@ -570,7 +693,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]::before,div[data-testid="stVerti
 [class*="st-key-glass"]::before,[class*="st-key-glass"]::after,.kpi:before,.kpi:after{display:none!important}
 .kpi{box-shadow:0 6px 18px rgba(0,0,0,.35)!important}
 .orb,.aurora-waves{display:none!important}
-*{animation:none!important}
+*:not(.ticker-track):not(.pf-link):not(.pf-ring){animation:none!important}
 </style>""", unsafe_allow_html=True)
 else:
     wave_background()
@@ -701,6 +824,42 @@ def time_ago(path):
     if seconds < 86400:
         return f"{int(seconds // 3600)} hours ago"
     return f"{int(seconds // 86400)} days ago"
+
+
+def iso_ago(value):
+    """'3 min ago' for an ISO timestamp (used by the evolution history)."""
+    try:
+        then = datetime.fromisoformat(str(value))
+        seconds = max((datetime.now(then.tzinfo) - then).total_seconds(), 0)
+    except Exception:
+        return "—"
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} min ago"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} hours ago"
+    return f"{int(seconds // 86400)} days ago"
+
+
+def evolution_text(event):
+    kind = event.get("event")
+    if kind == "DATASET_ADDED":
+        return f"v{event.get('version', '?')} · {event.get('dataset', 'dataset')} added, {event.get('candidates', 0)} link candidates"
+    if kind == "LINK_ACCEPTED":
+        return "Link accepted and added to the graph"
+    if kind == "LINK_REJECTED":
+        return "Link rejected, it will not be suggested again"
+    if kind == "DATASET_ROLLED_BACK":
+        return f"{event.get('dataset', 'Dataset')} rolled back"
+    return str(kind or "Change")
+
+
+def run_seconds(rep):
+    try:
+        return (datetime.fromisoformat(rep["completed_at"]) - datetime.fromisoformat(rep["started_at"])).total_seconds()
+    except Exception:
+        return None
 
 
 def format_duration(value):
@@ -1006,12 +1165,12 @@ def _build_schema_graph(entity_counts, height=480):
 
 
 @st.cache_resource(show_spinner=False)
-def _schema_graph_cached(items, height):
+def _schema_graph_cached(items, height, accent):
     return _build_schema_graph(dict(items), height)
 
 
 def make_schema_graph(entity_counts, height=480):
-    return _schema_graph_cached(tuple(sorted(entity_counts.items())), height)
+    return _schema_graph_cached(tuple(sorted(entity_counts.items())), height, GOLD)
 
 
 def make_donut(entity_counts, entities):
@@ -1052,6 +1211,9 @@ anomaly = stages.get("ANOMALY_DETECTION", {}).get("result", {})
 data = load_inventory()
 discovery_path = latest_discovery_file()
 discovery = read_json(discovery_path) if discovery_path else {}
+EVOLUTION_STATE = read_json(ROOT / "knowledge_base" / "state.json")
+_comm = read_json(LOG / "community_report.json")
+communities_text = f"{_comm['total_communities']:,}" if isinstance(_comm.get("total_communities"), int) else "—"
 
 status = summary.get("overall_status", "REPORT NOT FOUND")
 success_count = summary.get("successful_stages", 0)
@@ -1069,7 +1231,238 @@ last_run = first_key(summary, "end_time", "completed_at", "timestamp", "start_ti
 if not last_run and PIPELINE_PATH.exists():
     last_run = datetime.fromtimestamp(PIPELINE_PATH.stat().st_mtime).strftime("%b %d, %Y %I:%M %p")
 duration = format_duration(first_key(summary, "total_duration_seconds", "duration_seconds",
-                                     "total_execution_time", "execution_time_seconds"))
+                                     "total_execution_time", "execution_time_seconds") or run_seconds(report))
+
+
+STAGE_INFO = {
+    "INGESTION": ("⤓", "Ingest", "Loads the raw files, checks their quality and saves them as Parquet."),
+    "DATA_UNDERSTANDING": ("⚙", "Understand", "Profiles every column: types, missing values, distributions and outliers."),
+    "DATA_DISCOVERY": ("⌕", "Discover", "Looks for join keys and relationship candidates between datasets."),
+    "ANOMALY_DETECTION": ("◬", "Anomaly", "Flags unusual records with an Isolation Forest model."),
+    "NLP_PROCESSING": ("¶", "NLP", "Cleans review text and prepares it for entity recognition."),
+    "KNOWLEDGE_GRAPH": ("✣", "Graph", "Builds the knowledge graph and validates it."),
+}
+
+PIPE_ICON = {
+    "RAW": '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
+    "INGESTION": '<path d="M12 3v11m0 0-4-4m4 4 4-4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+    "DATA_UNDERSTANDING": '<path d="M4 20V11M10 20V5M16 20v-7M2 20h20"/>',
+    "DATA_DISCOVERY": '<circle cx="10.5" cy="10.5" r="6"/><path d="m20 20-4.8-4.8"/>',
+    "ANOMALY_DETECTION": '<path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5M12 17.5v.1"/>',
+    "NLP_PROCESSING": '<path d="M4 5h16v11H10l-5 4v-4H4z"/><path d="M8 9h8M8 12.5h5"/>',
+    "KNOWLEDGE_GRAPH": '<circle cx="6" cy="6.5" r="2.3"/><circle cx="18" cy="8" r="2.3"/><circle cx="12" cy="18" r="2.3"/>'
+                       '<path d="m8 7.2 7.8.6M7.2 8.5l3.6 7.4M16.8 10l-3.6 5.9"/>',
+    "OUT": '<path d="m12 3-9.5 5 9.5 5 9.5-5z"/><path d="m2.5 12 9.5 5 9.5-5"/><path d="m2.5 16 9.5 5 9.5-5"/>',
+}
+
+PIPELINE_LOG = LOG / "pipeline" / "run_live.log"
+
+
+def pipeline_diagram_html(states, selected=None):
+    """Flow diagram: raw data -> six stages -> insights. `states` maps stage -> done/running/failed/queued."""
+    def node(key, label, state, sel=False, cap=False):
+        mark = {"done": ("✓", ""), "failed": ("!", " bad")}.get(state) if not cap else None
+        badge = f'<span class="pf-badge{mark[1]}">{mark[0]}</span>' if mark else ""
+        return (f'<div class="pf-node {state}{" sel" if sel else ""}{" cap" if cap else ""}"><div class="pf-ring">'
+                f'<svg viewBox="0 0 24 24" aria-hidden="true">{PIPE_ICON[key]}</svg>{badge}</div>'
+                f'<div class="pf-name">{_esc(label)}</div></div>')
+
+    parts = [node("RAW", "Raw data", "done", cap=True)]
+    last_state = "done"
+    for name, (_icon, short, _desc) in STAGE_INFO.items():
+        state = states.get(name, "queued")
+        link = "done" if state in ("done", "failed") else "flow" if state == "running" else ""
+        parts.append(f'<div class="pf-link {link}"></div>')
+        parts.append(node(name, short, state, sel=(name == selected)))
+        last_state = state
+    parts.append(f'<div class="pf-link {"done" if last_state == "done" else ""}"></div>')
+    parts.append(node("OUT", "Insights", "done" if last_state == "done" else "queued", cap=True))
+    return '<div class="pf">' + "".join(parts) + "</div>"
+
+
+def _flatten_result(value, prefix=""):
+    """Turn a nested stage result into (label, text) pairs for the detail cards."""
+    rows = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            label = f"{prefix}{key}".replace("_", " ")
+            if isinstance(item, dict):
+                rows.extend(_flatten_result(item, f"{key} · ".replace("_", " ")))
+            elif isinstance(item, (list, tuple)) and item and all(isinstance(x, dict) for x in item):
+                rows.append((f"{label} · items", f"{len(item):,}"))
+                for field in ("status", "quality_status"):
+                    counts = {}
+                    for entry in item:
+                        if entry.get(field) is not None:
+                            counts[str(entry[field])] = counts.get(str(entry[field]), 0) + 1
+                    if counts:
+                        rows.append((f"{label} · {field}".replace("_", " "),
+                                     ", ".join(f"{n} {k}" for k, n in counts.items())))
+            elif isinstance(item, (list, tuple)):
+                shown = ", ".join(str(x) for x in item[:5]) + (" …" if len(item) > 5 else "")
+                rows.append((label, shown or "none"))
+            elif isinstance(item, bool) or not isinstance(item, int):
+                rows.append((label, str(item)))
+            else:
+                rows.append((label, f"{item:,}"))
+    elif value not in (None, ""):
+        rows.append((prefix.strip(" ·") or "result", str(value)))
+    return rows
+
+
+def _select_stage(name):
+    st.session_state.pipeline_stage = name
+
+
+def _pipeline_proc():
+    return st.session_state.get("pipeline_proc")
+
+
+def _pipeline_running():
+    proc = _pipeline_proc()
+    return proc is not None and proc.poll() is None
+
+
+def _ask_confirm():
+    st.session_state.pipeline_confirm = True
+
+
+def _cancel_confirm():
+    st.session_state.pipeline_confirm = False
+
+
+def _start_pipeline():
+    """Runs `python -m src.pipeline.run` in the background; the page keeps working."""
+    PIPELINE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    if PIPELINE_PATH.exists():                      # keep the last good report as a backup
+        shutil.copy(PIPELINE_PATH, PIPELINE_PATH.with_name("pipeline_execution_report.previous.json"))
+    log = open(PIPELINE_LOG, "w")
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    st.session_state.pipeline_proc = subprocess.Popen(
+        [sys.executable, "-m", "src.pipeline.run"], cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, env=env)
+    log.close()
+    st.session_state.pipeline_started = _time.time()
+    st.session_state.pipeline_confirm = False
+    st.session_state.pipeline_just_started = True
+    st.session_state.pop("pipeline_last_run", None)
+
+
+def _live_stage_status():
+    """Reads the run log: {stage: 'running' | 'done' | 'failed'}."""
+    status = {}
+    try:
+        lines = PIPELINE_LOG.read_text(errors="ignore").splitlines()
+    except OSError:
+        return status
+    for line in lines:
+        for pattern, state in ((r"Starting stage: (\w+)", "running"), (r"Completed stage: (\w+)", "done"),
+                               (r"Stage failed: (\w+)", "failed")):
+            m = re.search(pattern, line)
+            if m:
+                status[m.group(1)] = state
+                break
+    return status
+
+
+def _pipeline_panel_body(stages_map, last_run_text, duration_text, records):
+    if st.session_state.pop("pipeline_just_started", False):
+        st.rerun()                                  # full rerun so this panel starts polling
+    proc = _pipeline_proc()
+    running = proc is not None and proc.poll() is None
+
+    if proc is not None and not running:            # a run just finished
+        st.session_state.pipeline_last_run = {
+            "code": proc.returncode, "seconds": int(_time.time() - st.session_state.get("pipeline_started", _time.time()))}
+        st.session_state.pipeline_proc = None
+        st.cache_data.clear()
+        st.rerun()                                  # refresh every number on the page
+
+    if running:                                     # ---------- live view
+        live = _live_stage_status()
+        done = sum(v == "done" for v in live.values())
+        elapsed = int(_time.time() - st.session_state.get("pipeline_started", _time.time()))
+        html(pipeline_diagram_html(live))
+        st.progress(min(done / len(STAGE_INFO), 0.97),
+                    text=f"Running the pipeline… {done} of {len(STAGE_INFO)} stages done · {elapsed}s")
+        with st.expander("Live log"):
+            try:
+                st.code("\n".join(PIPELINE_LOG.read_text(errors="ignore").splitlines()[-14:]) or "Starting…")
+            except OSError:
+                st.caption("Log not available yet.")
+        return
+
+    # ---------- idle view
+    finished = st.session_state.get("pipeline_last_run")
+    if finished:
+        if finished["code"] == 0:
+            st.success(f"Pipeline finished in {finished['seconds']}s. The dashboard now shows the new results.")
+        else:
+            st.error(f"The pipeline stopped with exit code {finished['code']}. See {PIPELINE_LOG.relative_to(ROOT)}. "
+                     "The previous report is saved as pipeline_execution_report.previous.json.")
+    if st.session_state.get("pipeline_confirm"):
+        st.warning("This re-runs all 6 stages (about 1 to 2 minutes) and replaces the saved pipeline report. "
+                   "The previous report is kept as a backup.")
+        c1, c2, _gap = st.columns([1, 1, 3])
+        c1.button("Start run", key="pl_start", type="primary", on_click=_start_pipeline, use_container_width=True)
+        c2.button("Cancel", key="pl_cancel", on_click=_cancel_confirm, use_container_width=True)
+    else:
+        try:
+            holder = st.container(key="run_btn")
+        except TypeError:
+            holder = st.container()
+        with holder:
+            st.button("▶  Run pipeline", key="pl_run", on_click=_ask_confirm,
+                      disabled=not (ROOT / "src" / "pipeline" / "run.py").exists())
+
+    if not stages_map:
+        html(pipeline_diagram_html({}))
+        st.warning("Pipeline report not found. Click Run pipeline to create one.")
+        return
+
+    names = list(stages_map)
+    if st.session_state.get("pipeline_stage") not in names:
+        st.session_state.pipeline_stage = names[0]
+    chosen = st.session_state.pipeline_stage
+    states = {n: ("done" if s.get("status") == "SUCCESS" else "failed") for n, s in stages_map.items()}
+    html(pipeline_diagram_html(states, selected=chosen))
+
+    try:
+        row = st.container(key="stage_row")
+    except TypeError:
+        row = st.container()
+    with row:
+        for col, name in zip(st.columns(len(names), gap="small"), names):
+            short = STAGE_INFO.get(name, ("•", name.replace("_", " ").title(), ""))[1]
+            col.button(short, key=f"stage_{name}", on_click=_select_stage, args=(name,), use_container_width=True,
+                       type="primary" if chosen == name else "secondary")
+
+    info = stages_map[chosen]
+    icon, short, desc = STAGE_INFO.get(chosen, ("•", chosen.replace("_", " ").title(), ""))
+    badge = ('<span class="chip-ok">✓ Success</span>' if info.get("status") == "SUCCESS"
+             else f'<span class="chip-warn">{_esc(str(info.get("status", "UNKNOWN")))}</span>')
+    cards = "".join(
+        f'<div class="kv-i{" long" if len(v) > 36 else ""}"><small>{_esc(k)}</small><b>{_esc(v)}</b></div>'
+        for k, v in _flatten_result(info.get("result"))[:12])
+    html(f'<div class="stage-detail"><div class="stage-head"><div class="stage-name">{icon} {_esc(short)}</div>{badge}</div>'
+         f'<div class="stage-desc">{_esc(desc)}</div><div class="kv">{cards}</div></div>')
+    if info.get("error"):
+        st.error(str(info["error"]))
+    with st.expander("Raw result (JSON)"):
+        st.json(info.get("result", {}))
+    html('<div class="flow-foot">'
+         f'<div class="ff"><span>▦</span><div><small>Last Run</small>{_esc(str(last_run_text or "—"))}</div></div>'
+         f'<div class="ff"><span>◷</span><div><small>Duration</small>{_esc(str(duration_text))}</div></div>'
+         f'<div class="ff"><span>⛁</span><div><small>Processed Records</small>{records:,}</div></div></div>')
+
+
+def pipeline_panel(stages_map, last_run_text, duration_text, records):
+    """One panel: diagram, run button, stage details. Polls every 2 s only while a run is active."""
+    frag = getattr(st, "fragment", None)
+    if frag is None:
+        _pipeline_panel_body(stages_map, last_run_text, duration_text, records)
+        return
+    frag(run_every=2 if _pipeline_running() else None)(_pipeline_panel_body)(
+        stages_map, last_run_text, duration_text, records)
 
 
 def stage_ok(*names):
@@ -1130,7 +1523,8 @@ with nav_col:
             '<div class="version">v1.1.0</div>'
         )
         st.toggle("Smooth mode (faster)", value=True, key="smooth_mode",
-                  help="Turns off blur, glow and animations. Best for laptops.")
+                  help="Turns off blur, glow and most animations. Best for laptops.")
+        st.selectbox("Colour theme", list(THEMES), key="theme")
 
 
     
@@ -1161,6 +1555,20 @@ with main_col:
         '<div class="hero-sub">Autonomous Data Discovery<b>•</b>Knowledge Graph<b>•</b>'
         'Anomaly Intelligence<b>•</b>Cross-Domain Analysis</div>'
     )
+
+    _evo_cands = (EVOLUTION_STATE or {}).get("candidates", [])
+    _ticker_items = [
+        f"<b>{len(data)}</b> datasets",
+        f"<b>{record_count:,}</b> records",
+        f"<b>{entities:,}</b> entities",
+        f"<b>{relationships:,}</b> relationships",
+        f"<b>{(anomaly.get('anomaly_count', 0) or 0):,}</b> anomalies flagged",
+        f"graph <b>v{(EVOLUTION_STATE or {}).get('version', 0)}</b>",
+        f"<b>{sum(c.get('status') == 'pending' for c in _evo_cands)}</b> links to review",
+        f"pipeline <b>{success_count}/{stage_count}</b> stages OK",
+    ]
+    _ticker_html = "".join(f'<span class="tk"><i></i><span>{t}</span></span>' for t in _ticker_items)
+    html(f'<div class="ticker"><div class="ticker-track">{_ticker_html}{_ticker_html}</div></div>')
 
     
     # ================= GLOBAL SEARCH =================
@@ -1303,7 +1711,7 @@ with main_col:
                                 '<div class="kg-stats">'
                                 f'<div class="kg-stat"><div class="kg-ico">✣</div><div><div class="kg-lbl">Entities</div><div class="kg-val">{entities:,}</div></div></div>'
                                 f'<div class="kg-stat"><div class="kg-ico blue">⛓</div><div><div class="kg-lbl">Relationships</div><div class="kg-val">{relationships:,}</div></div></div>'
-                                '<div class="kg-stat"><div class="kg-ico gold">◈</div><div><div class="kg-lbl">Communities</div><div class="kg-val">—</div></div></div>'
+                                f'<div class="kg-stat"><div class="kg-ico gold">◈</div><div><div class="kg-lbl">Communities (sample)</div><div class="kg-val">{communities_text}</div></div></div>'
                                 f'<div class="kg-stat"><div class="kg-ico">▦</div><div><div class="kg-lbl">Domains</div><div class="kg-val">{len(entity_counts)}</div></div></div>'
                                 f'<div class="kg-stat"><div class="kg-ico gold">↗</div><div><div class="kg-lbl">Avg. Degree</div><div class="kg-val">{avg_degree:.2f}</div></div></div>'
                                 '</div>'
@@ -1436,6 +1844,13 @@ with main_col:
                         (f"{meta.get('connected_dataset_pair_count', '—')} connected dataset pairs found", when),
                         (f"{meta.get('total_relationship_candidates', '—')} relationship candidates to validate", when),
                     ]
+                    latest_add = next((h for h in reversed(EVOLUTION_STATE.get("history", []))
+                                       if h.get("event") == "DATASET_ADDED"), None)
+                    if latest_add:
+                        rows.insert(0, (f"{_esc(str(latest_add.get('dataset')))} added: "
+                                        f"{latest_add.get('candidates', 0)} link candidates",
+                                        iso_ago(latest_add.get("time"))))
+                    rows = rows[:3]
                     html("".join(
                         f'<div class="row"><div class="row-ico">▤</div><div class="row-main">{t}<small>{w}</small></div>'
                         f'<div class="row-arrow">›</div></div>' for t, w in rows
@@ -1451,30 +1866,7 @@ with main_col:
                 chip = ('<span class="chip-ok">✓ Completed</span>' if stage_count and success_count == stage_count
                         else f'<span class="chip-warn">{status}</span>')
                 panel_header("▷", "Pipeline Execution", chip)
-                icons = {"INGESTION": "⤓", "DATA_UNDERSTANDING": "⚙", "DATA_DISCOVERY": "⌕",
-                         "ANOMALY_DETECTION": "◬", "NLP_PROCESSING": "¶", "KNOWLEDGE_GRAPH": "✣"}
-                short_names = {"INGESTION": "Ingest", "DATA_UNDERSTANDING": "Understand",
-                               "DATA_DISCOVERY": "Discover", "ANOMALY_DETECTION": "Anomaly",
-                               "NLP_PROCESSING": "NLP", "KNOWLEDGE_GRAPH": "Graph"}
-                if stages:
-                    steps = []
-                    for stage_name, info in stages.items():
-                        ok = info.get("status") == "SUCCESS"
-                        steps.append(
-                            f'<div class="step"><div class="step-ico">{icons.get(stage_name, "•")}'
-                            f'<div class="step-badge{"" if ok else " warn"}">{"✓" if ok else "!"}</div></div>'
-                            f'<div class="step-name">{short_names.get(stage_name, stage_name.replace("_", " ").title())}</div></div>'
-                        )
-                    html(
-                        '<div class="flow">' + '<div class="arrow">→</div>'.join(steps) + '</div>'
-                        '<div class="flow-foot">'
-                        f'<div class="ff"><span>▦</span><div><small>Last Run</small>{last_run or "—"}</div></div>'
-                        f'<div class="ff"><span>◷</span><div><small>Duration</small>{duration}</div></div>'
-                        f'<div class="ff"><span>⛁</span><div><small>Processed Records</small>{record_count:,}</div></div>'
-                        '</div>'
-                    )
-                else:
-                    st.warning("Pipeline report not found.")
+                pipeline_panel(stages, last_run, duration, record_count)
 
         with anomaly_col:
             with glass_panel("p6"):
@@ -1539,6 +1931,37 @@ with main_col:
                 else:
                     st.info("Relationship statistics unavailable.")
                 st.caption("Connectivity does not establish causation.")
+
+        evo = EVOLUTION_STATE or {}
+        evo_cands = evo.get("candidates", [])
+        pending_n = sum(c.get("status") == "pending" for c in evo_cands)
+        accepted_n = sum(c.get("status") == "accepted" for c in evo_cands)
+        rejected_n = sum(c.get("status") == "rejected" for c in evo_cands)
+        evo_hist = list(reversed(evo.get("history", [])))[:4]
+        with glass_panel("p_evo"):
+            evo_chip = (f'<span class="chip-warn">{pending_n} links to review</span>' if pending_n
+                        else '<span class="chip-ok">Nothing to review</span>')
+            panel_header("⟲", "Self-Evolving Graph", evo_chip)
+            e1, e2, e3, e4 = st.columns(4)
+            e1.metric("Graph version", f"v{evo.get('version', 0)}")
+            e2.metric("Uploaded datasets", len(evo.get("datasets", {})))
+            e3.metric("Accepted links", accepted_n)
+            e4.metric("Rejected links", rejected_n)
+            if evo_hist:
+                html("".join(
+                    f'<div class="row"><div class="row-ico">⟲</div><div class="row-main">'
+                    f'{_esc(evolution_text(h))}<small>{_esc(iso_ago(h.get("time")))}</small></div></div>'
+                    for h in evo_hist
+                ))
+            else:
+                st.info("No uploads yet. Add a dataset and watch the graph evolve.")
+            b1, b2, _spacer = st.columns([1, 1, 4])
+            if b1.button("Review links", key="evo_review", use_container_width=True):
+                st.session_state.active_page = "Add Dataset"
+                st.rerun()
+            if b2.button("Add dataset", key="evo_add", type="primary", use_container_width=True):
+                st.session_state.active_page = "Add Dataset"
+                st.rerun()
 
     
     # =================== ADD DATASET ===================
