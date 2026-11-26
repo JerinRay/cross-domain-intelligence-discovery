@@ -5,13 +5,14 @@ import math
 import re
 import sqlite3
 import sys
+from html import escape as _esc
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 # =========================================================
-# CROSS-DOMAIN INTELLIGENCE — DAY 13 FRONTEND (Aurora Gold)
+# CROSS-DOMAIN INTELLIGENCE — FRONTEND (Aurora Gold)
 # =========================================================
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,14 @@ try:
 except ImportError:  # keep the page usable even if the shared theme module is missing
     def apply_theme():
         return None
+
+try:
+    from components.add_dataset import render_add_dataset
+except ImportError as _add_dataset_error:  # keep the dashboard usable if the new page has a problem
+    _add_dataset_error_text = str(_add_dataset_error)
+
+    def render_add_dataset(root):
+        st.error(f"Add Dataset page could not be loaded: {_add_dataset_error_text}")
 
 st.set_page_config(
     page_title="Cross-Domain Intelligence",
@@ -53,10 +62,12 @@ FILES = {
 NAV_ITEMS = {
     "Dashboard": "⌂",
     "Data Management": "☷",
+    "Add Dataset": "⊕",
     "Discovery Engine": "⌕",
     "Knowledge Graph": "✣",
     "Intelligence": "◬",
     "Reports": "▤",
+    "AI Assistant": "✦",
 }
 
 # Palette shared by CSS and Plotly
@@ -469,6 +480,45 @@ div[data-testid="stRadio"] label p{font-size:16.5px!important}
     border-color: rgba(255,255,255,0.18) !important;
 }
 
+/* =================== AI CHATBOT =================== */
+.chat-wrap{display:flex;flex-direction:column;gap:14px;padding:6px 0 10px}
+.chat-msg{display:flex;gap:12px;align-items:flex-start;animation:fadeUp .25s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.chat-msg.user{flex-direction:row-reverse}
+.chat-avatar{min-width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-size:17px;flex-shrink:0}
+.chat-avatar.ai{background:linear-gradient(140deg,rgba(233,183,101,.35),rgba(184,135,58,.18));
+  border:1px solid rgba(233,183,101,.55);color:#f5cd86;box-shadow:0 0 16px rgba(233,183,101,.2)}
+.chat-avatar.user{background:linear-gradient(140deg,#f4cf8c,#c08c3e);color:#2a1d08;font:700 13px 'Exo 2',sans-serif}
+.chat-bubble{max-width:82%;padding:13px 16px;border-radius:18px;font-size:15px;line-height:1.6;position:relative}
+.chat-bubble.ai{background:linear-gradient(155deg,rgba(255,255,255,.10),rgba(255,255,255,.04));
+  backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.14);color:#f0ece3;border-top-left-radius:4px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 8px 24px rgba(0,0,0,.35)}
+.chat-bubble.user{background:linear-gradient(135deg,rgba(233,183,101,.28),rgba(184,135,58,.18));
+  border:1px solid rgba(233,183,101,.45);color:#f5eed8;border-top-right-radius:4px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 8px 24px rgba(0,0,0,.3)}
+.chat-time{font-size:10.5px;color:#7c7f8e;margin-top:5px}
+.chat-thinking{display:flex;gap:5px;padding:4px 0}
+.chat-thinking span{width:7px;height:7px;border-radius:50%;background:#e9b765;
+  animation:blink 1.2s infinite ease-in-out}
+.chat-thinking span:nth-child(2){animation-delay:.2s}
+.chat-thinking span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+.chat-suggestion{display:inline-block;padding:7px 14px;border:1px solid rgba(233,183,101,.35);
+  border-radius:20px;background:rgba(233,183,101,.07);color:#f0d9a8;font-size:13px;
+  cursor:pointer;margin:3px;transition:.18s}
+.chat-suggestion:hover{background:rgba(233,183,101,.16);border-color:rgba(233,183,101,.6)}
+.chat-header{display:flex;align-items:center;gap:14px;padding-bottom:14px;
+  border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:4px}
+.chat-status{width:9px;height:9px;border-radius:50%;background:#3fd68a;
+  box-shadow:0 0 10px #3fd68a;animation:pulse-dot 2s infinite}
+@keyframes pulse-dot{0%,100%{transform:scale(1)}50%{transform:scale(1.3)}}
+.api-setup{background:linear-gradient(155deg,rgba(233,183,101,.10),rgba(233,183,101,.04));
+  border:1px solid rgba(233,183,101,.35);border-radius:16px;padding:20px 22px;margin:10px 0}
+.context-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;
+  border:1px solid rgba(255,255,255,.12);border-radius:20px;background:rgba(255,255,255,.05);
+  font-size:12px;color:#c9c5bb;margin:3px}
+.context-pill .dot{width:6px;height:6px;border-radius:50%}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -508,7 +558,22 @@ def wave_background():
     st.markdown(svg, unsafe_allow_html=True)
 
 
-wave_background()
+SMOOTH = st.session_state.get("smooth_mode", True)
+if SMOOTH:
+    st.markdown("""<style>
+div[data-testid="stVerticalBlockBorderWrapper"],[class*="st-key-glass"],.rail,.kpi,.health-card,.search,
+.chat-bubble.ai,div[data-testid="stRadio"] [role="radiogroup"],.kpi-ico,.row-ico,.kg-ico,.step-ico{
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+div[data-testid="stVerticalBlockBorderWrapper"],[class*="st-key-glass"],.rail{
+  background:rgba(22,23,32,.94)!important;box-shadow:0 8px 22px rgba(0,0,0,.35)!important}
+div[data-testid="stVerticalBlockBorderWrapper"]::before,div[data-testid="stVerticalBlockBorderWrapper"]::after,
+[class*="st-key-glass"]::before,[class*="st-key-glass"]::after,.kpi:before,.kpi:after{display:none!important}
+.kpi{box-shadow:0 6px 18px rgba(0,0,0,.35)!important}
+.orb,.aurora-waves{display:none!important}
+*{animation:none!important}
+</style>""", unsafe_allow_html=True)
+else:
+    wave_background()
 
 # ---------------------- HELPERS ---------------------------
 
@@ -531,9 +596,17 @@ def glass_panel(name):
         return st.container(border=True)
 
 
+@st.cache_data(show_spinner=False)
+def _read_json_cached(path_str, mtime):
+    try:
+        return json.loads(Path(path_str).read_text())
+    except Exception:
+        return {}
+
+
 def read_json(path):
     try:
-        return json.loads(path.read_text()) if path.exists() else {}
+        return _read_json_cached(str(path), path.stat().st_mtime) if path.exists() else {}
     except Exception:
         return {}
 
@@ -552,14 +625,44 @@ def load_inventory():
         path = locate(filename)
         if path:
             try:
-                frame = pd.read_parquet(path)
+                import pyarrow.parquet as pq
+                meta = pq.ParquetFile(path).metadata
                 rows.append({
-                    "Dataset": name, "Rows": len(frame), "Columns": len(frame.columns),
+                    "Dataset": name, "Rows": meta.num_rows, "Columns": meta.num_columns,
+                    "Size (MB)": round(path.stat().st_size / 1048576, 2), "Path": str(path),
+                })
+            except Exception:
+                continue
+
+    # datasets uploaded through the Add Dataset page
+    state_file = ROOT / "knowledge_base" / "state.json"
+    try:
+        uploaded = json.loads(state_file.read_text()).get("datasets", {}) if state_file.exists() else {}
+    except Exception:
+        uploaded = {}
+    for name, info in uploaded.items():
+        path = Path(info.get("path", ""))
+        if path.exists():
+            try:
+                import pyarrow.parquet as pq
+                meta = pq.ParquetFile(path).metadata
+                rows.append({
+                    "Dataset": name, "Rows": meta.num_rows, "Columns": meta.num_columns,
                     "Size (MB)": round(path.stat().st_size / 1048576, 2), "Path": str(path),
                 })
             except Exception:
                 continue
     return pd.DataFrame(rows)
+
+
+@st.cache_resource(show_spinner="Loading dataset...", max_entries=2)
+def load_frame(path_str, mtime):
+    return pd.read_parquet(path_str)
+
+
+@st.cache_data(show_spinner=False)
+def read_anomaly_csv(mtime):
+    return pd.read_csv(ANOMALY_CSV)
 
 
 def kpi(icon, label, value, chip, tone):
@@ -684,7 +787,7 @@ def search_pipeline_stages(query, pipeline_stages):
     return matches
 
 
-def make_schema_graph(entity_counts, height=480):
+def _build_schema_graph(entity_counts, height=480):
     """Neural-network view of the knowledge graph.
 
     Each entity type is a glowing neuron (soma) with branching dendrites; curved,
@@ -814,7 +917,7 @@ def make_schema_graph(entity_counts, height=480):
 
     # ---- draw fibres: wide faint glow, medium glow, bright core ----------
     for (colour, width), (xs, ys) in fibres.items():
-        for w_mul, alpha in [(4.5, .06), (2.2, .16), (1.0, .85)]:
+        for w_mul, alpha in [(2.2, .16), (1.0, .85)]:
             fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", hoverinfo="skip", showlegend=False,
                                      line=dict(color=rgba(colour, alpha), width=width * w_mul,
                                                shape="spline", smoothing=.6)))
@@ -900,6 +1003,15 @@ def make_schema_graph(entity_counts, height=480):
                         font=dict(color="#f3efe6", family="Exo 2, sans-serif", size=16)),
     )
     return fig
+
+
+@st.cache_resource(show_spinner=False)
+def _schema_graph_cached(items, height):
+    return _build_schema_graph(dict(items), height)
+
+
+def make_schema_graph(entity_counts, height=480):
+    return _schema_graph_cached(tuple(sorted(entity_counts.items())), height)
 
 
 def make_donut(entity_counts, entities):
@@ -1015,8 +1127,10 @@ with nav_col:
             '<div class="health-pulse">∿</div></div>'
             f'<div class="health-sub">{"All services operational" if all_ok else "Some stages need attention"}</div>'
             f'<div class="health-grid">{grid}</div></div>'
-            '<div class="version">v1.0.0 &nbsp;&nbsp;|&nbsp;&nbsp; Day 13</div>'
+            '<div class="version">v1.1.0</div>'
         )
+        st.toggle("Smooth mode (faster)", value=True, key="smooth_mode",
+                  help="Turns off blur, glow and animations. Best for laptops.")
 
 
     
@@ -1158,7 +1272,7 @@ with main_col:
     if page == "Dashboard" and not search_term:
         k1, k2, k3, k4 = st.columns(4, gap="medium")
         with k1:
-            kpi("⛁", "Datasets", f"{len(data):,}", f"✓ {len(data)}/{len(FILES)} loaded", "purple")
+            kpi("⛁", "Datasets", f"{len(data):,}", f"✓ {len(data)} loaded", "purple")
         with k2:
             kpi("▤", "Total Records", f"{record_count:,}", "", "blue")
         with k3:
@@ -1374,7 +1488,7 @@ with main_col:
                     drawn = False
                     if ANOMALY_CSV.exists():
                         try:
-                            frame = pd.read_csv(ANOMALY_CSV)
+                            frame = read_anomaly_csv(ANOMALY_CSV.stat().st_mtime)
                             numeric = frame.select_dtypes(include="number").columns.tolist()
                             if numeric:
                                 chosen = "approval_delay_hours" if "approval_delay_hours" in numeric else numeric[0]
@@ -1427,6 +1541,12 @@ with main_col:
                 st.caption("Connectivity does not establish causation.")
 
     
+    # =================== ADD DATASET ===================
+    elif page == "Add Dataset":
+        with glass_panel("p_add"):
+            page_header("Add Dataset", "Upload a dataset and watch the knowledge graph evolve.")
+            render_add_dataset(ROOT)
+
     # =================== DATA MANAGEMENT ===================
     elif page == "Data Management":
         with glass_panel("p8"):
@@ -1472,7 +1592,7 @@ with main_col:
                         ].iloc[0]
                     )
 
-                    frame = pd.read_parquet(selected_path)
+                    frame = load_frame(str(selected_path), selected_path.stat().st_mtime)
 
                     # Dataset statistics
                     m1, m2, m3 = st.columns(3)
@@ -1497,17 +1617,17 @@ with main_col:
                         key="record_search"
                     )
 
-                    filtered = frame.copy()
+                    filtered = frame
 
                     if record_search.strip():
-                        search_mask = filtered.astype(str).apply(
-                            lambda column: column.str.contains(
-                                record_search.strip(),
-                                case=False,
-                                na=False,
-                                regex=False
-                            )
-                        ).any(axis=1)
+                        term = record_search.strip()
+                        search_cols = list(filtered.select_dtypes(include=["object", "string"]).columns)
+                        if term.replace(".", "", 1).isdigit():       # numbers: also look in numeric columns
+                            search_cols += list(filtered.select_dtypes(include="number").columns)
+                        search_mask = pd.Series(False, index=filtered.index)
+                        for col_name in search_cols:
+                            search_mask |= filtered[col_name].astype("string").str.contains(
+                                term, case=False, na=False, regex=False)
 
     
 
@@ -1598,9 +1718,12 @@ with main_col:
                         )
 
                         # Download filtered data
-                        csv_data = filtered[selected_columns].to_csv(
+                        too_big = len(filtered) > 200_000
+                        csv_data = b"" if too_big else filtered[selected_columns].to_csv(
                             index=False
                         ).encode("utf-8")
+                        if too_big:
+                            st.caption("Narrow the filters to under 200,000 rows to enable CSV download.")
 
                         st.download_button(
                             "Download filtered CSV",
@@ -1609,6 +1732,7 @@ with main_col:
                                 f"{selected.lower().replace(' ', '_')}_filtered.csv"
                             ),
                             mime="text/csv",
+                            disabled=too_big,
                             use_container_width=False
                         )
 
@@ -1924,10 +2048,269 @@ with main_col:
             st.caption(anomaly.get("interpretation", "No interpretation in report."))
             if ANOMALY_CSV.exists():
                 with st.expander("Preview investigated records"):
-                    frame = pd.read_csv(ANOMALY_CSV)
+                    frame = read_anomaly_csv(ANOMALY_CSV.stat().st_mtime)
                     st.dataframe(frame.head(100), use_container_width=True)
                     st.download_button("Download anomaly results", ANOMALY_CSV.read_bytes(),
                                        file_name=ANOMALY_CSV.name, mime="text/csv")
+
+    # =================== AI ASSISTANT ====================
+    elif page == "AI Assistant":
+        import os
+        from datetime import datetime as _dt
+
+        page_header("AI Assistant", "Chat with an AI that knows your knowledge graph, anomalies and pipeline.")
+
+        # ---- session state init ----
+        if "chat_messages" not in st.session_state:
+            st.session_state.chat_messages = []
+        if "chat_api_key" not in st.session_state:
+            st.session_state.chat_api_key = os.environ.get("GEMINI_API_KEY", "")
+        if "chat_model" not in st.session_state:
+            st.session_state.chat_model = "gemini-2.0-flash"
+        if "chat_nonce" not in st.session_state:
+            st.session_state.chat_nonce = 0
+
+        # ---- build context from live project data ----
+        def build_system_context():
+            ctx_parts = [
+                "You are an expert AI assistant embedded in the Cross-Domain Intelligence Platform.",
+                "You help users understand their knowledge graph, anomaly detection results, pipeline "
+                "execution and cross-domain data discovery findings.",
+                "",
+                "=== LIVE PROJECT CONTEXT ===",
+                f"• Total entities in Knowledge Graph: {entities:,}",
+                f"• Total relationships: {relationships:,}",
+                f"• Entity types: {', '.join(entity_counts.keys()) if entity_counts else 'Not available'}",
+                f"• Pipeline status: {status} ({success_count}/{stage_count} stages successful)",
+                f"• Last pipeline run: {last_run or 'Not available'}",
+                f"• Anomalies detected: {anomaly.get('anomaly_count', 0):,} "
+                  f"(rate: {(anomaly.get('anomaly_count', 0) / max(anomaly.get('total_records', 1), 1) * 100):.2f}%)",
+                f"• Anomaly detection method: {anomaly.get('method', 'Isolation Forest')}",
+                f"• Processed datasets: {len(data)} ({record_count:,} total records)",
+                f"• Avg graph degree: {avg_degree:.2f}",
+            ]
+            if discovery:
+                meta = discovery.get("metadata", discovery)
+                ctx_parts += [
+                    f"• Discovery: {meta.get('total_relationship_candidates', 0)} relationship candidates found "
+                    f"across {meta.get('dataset_pair_count', 0)} dataset pairs",
+                ]
+            ctx_parts += [
+                "",
+                "Answer questions about the data, suggest analysis approaches, explain anomalies, "
+                "and help interpret the knowledge graph. Be concise but thorough. "
+                "Use markdown formatting in your responses.",
+            ]
+            return "\n".join(ctx_parts)
+
+        SUGGESTIONS = [
+            "What do the anomaly detection results mean?",
+            "Explain the Knowledge Graph structure",
+            "Which pipeline stages succeeded?",
+            "What are cross-domain relationship candidates?",
+            "How is Isolation Forest used here?",
+            "Summarize the project findings",
+        ]
+
+        # ---- top layout: config sidebar + chat ----
+        cfg_col, chat_col = st.columns([1, 2.6], gap="medium")
+
+        with cfg_col:
+            with glass_panel("ai_cfg"):
+                html('<div class="chat-header"><div class="chat-status"></div>'
+                     '<div style="flex:1"><div style="font:600 16px \'Exo 2\',sans-serif;color:#fff">AI Assistant</div>'
+                     '<div style="font-size:12px;color:#9a9fae">Powered by Gemini</div></div></div>')
+
+                api_key = st.text_input(
+                    "Gemini API Key",
+                    value=st.session_state.chat_api_key,
+                    type="password",
+                    placeholder="AIza...",
+                    help="Get your key from https://aistudio.google.com",
+                    key="ai_api_key_input",
+                )
+                if api_key != st.session_state.chat_api_key:
+                    st.session_state.chat_api_key = api_key
+
+                model_choice = st.selectbox(
+                    "Model",
+                    ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash-preview-05-20"],
+                    index=["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash-preview-05-20"].index(
+                        st.session_state.chat_model
+                    ) if st.session_state.chat_model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash-preview-05-20"] else 0,
+                    key="ai_model_select",
+                )
+                st.session_state.chat_model = model_choice
+
+                st.markdown("---")
+                html('<div style="font:600 13px \'Exo 2\',sans-serif;color:#e9b765;margin-bottom:8px">📊 Live Context</div>')
+                ctx_pills = [
+                    (f"{entities:,} entities", "#9d6bff"),
+                    (f"{relationships:,} edges", "#4f86ff"),
+                    (f"{anomaly.get('anomaly_count', 0):,} anomalies", "#ff5d6c"),
+                    (f"{len(data)} datasets", "#3fd68a"),
+                    (f"{success_count}/{stage_count} stages", "#e9b765"),
+                ]
+                html("".join(
+                    f'<span class="context-pill"><span class="dot" style="background:{c}"></span>{label}</span>'
+                    for label, c in ctx_pills
+                ))
+
+                st.markdown("---")
+                if st.button("🗑 Clear Chat", use_container_width=True, key="ai_clear_chat"):
+                    st.session_state.chat_messages = []
+                    st.rerun()
+
+                st.caption("Your API key is only stored in session memory and never sent anywhere except the Gemini API.")
+
+        with chat_col:
+            with glass_panel("ai_chat"):
+                # -- suggestions (only when no history) --
+                if not st.session_state.chat_messages:
+                    html('<div style="font:600 14px \'Exo 2\',sans-serif;color:#e9b765;margin-bottom:10px">✦ Try asking…</div>')
+                    sug_cols = st.columns(2)
+                    for i, sug in enumerate(SUGGESTIONS):
+                        with sug_cols[i % 2]:
+                            if st.button(sug, key=f"sug_{i}", use_container_width=True):
+                                st.session_state.pending_prompt = sug
+                                st.rerun()
+                    st.markdown("---")
+
+                # -- render message history --
+                if st.session_state.chat_messages:
+                    bubbles_html = '<div class="chat-wrap">'
+                    for msg in st.session_state.chat_messages:
+                        role = msg["role"]
+                        content = msg["content"]
+                        time_str = msg.get("time", "")
+                        if role == "user":
+                            bubbles_html += (
+                                f'<div class="chat-msg user">'
+                                f'<div class="chat-avatar user">JR</div>'
+                                f'<div>'
+                                f'<div class="chat-bubble user">{_esc(content)}</div>'
+                                f'<div class="chat-time" style="text-align:right">{time_str}</div>'
+                                f'</div></div>'
+                            )
+                        else:
+                            # render AI markdown properly via st.markdown
+                            bubbles_html += (
+                                f'<div class="chat-msg">'
+                                f'<div class="chat-avatar ai">✦</div>'
+                                f'<div>'
+                                f'<div class="chat-bubble ai">'
+                            )
+                            html(bubbles_html)
+                            bubbles_html = ""
+                            st.markdown(content)
+                            html(f'</div><div class="chat-time">{time_str}</div></div></div>')
+                    if bubbles_html:
+                        html(bubbles_html + '</div>')
+                    else:
+                        html('</div>')
+
+                # -- input row --
+                st.markdown("")
+                inp_col, btn_col = st.columns([5, 1], gap="small")
+                with inp_col:
+                    user_input = st.text_input(
+                        "Message",
+                        placeholder="Ask about your knowledge graph, anomalies, pipeline…",
+                        label_visibility="collapsed",
+                        key=f"ai_chat_input_{st.session_state.chat_nonce}",
+                    )
+                with btn_col:
+                    send_clicked = st.button("Send ›", type="primary", use_container_width=True, key="ai_send_btn")
+
+                # -- process send --
+                pending_prompt = st.session_state.pop("pending_prompt", None)
+                prompt_text = (pending_prompt or user_input or "").strip()
+                if (pending_prompt or send_clicked or user_input) and prompt_text:
+                    if not st.session_state.chat_api_key.strip():
+                        st.warning("⚠ Please enter your Gemini API key in the left panel to start chatting.")
+                    else:
+                        # append user message
+                        st.session_state.chat_messages.append({
+                            "role": "user",
+                            "content": prompt_text,
+                            "time": _dt.now().strftime("%H:%M"),
+                        })
+
+                        # call Gemini API
+                        with st.spinner("✦ Thinking…"):
+                            try:
+                                import urllib.request as _req
+                                import urllib.error as _uerr
+
+                                # Build Gemini API request (REST, no extra SDK needed)
+                                api_key_val = st.session_state.chat_api_key.strip()
+                                model_val = st.session_state.chat_model
+
+                                system_ctx = build_system_context()
+
+                                # Build conversation history for multi-turn
+                                gem_contents = []
+                                # inject system context as first user turn
+                                gem_contents.append({
+                                    "role": "user",
+                                    "parts": [{"text": f"[SYSTEM CONTEXT - read and remember, do not repeat back]\n{system_ctx}"}]
+                                })
+                                gem_contents.append({
+                                    "role": "model",
+                                    "parts": [{"text": "Understood. I'm ready to help you explore your Cross-Domain Intelligence Platform."}]
+                                })
+
+                                for msg in st.session_state.chat_messages:
+                                    gem_contents.append({
+                                        "role": "user" if msg["role"] == "user" else "model",
+                                        "parts": [{"text": msg["content"]}]
+                                    })
+
+                                payload = json.dumps({
+                                    "contents": gem_contents,
+                                    "generationConfig": {
+                                        "temperature": 0.7,
+                                        "maxOutputTokens": 1024,
+                                    }
+                                }).encode("utf-8")
+
+                                url = (
+                                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                                    f"{model_val}:generateContent?key={api_key_val}"
+                                )
+                                req = _req.Request(
+                                    url, data=payload,
+                                    headers={"Content-Type": "application/json"},
+                                    method="POST",
+                                )
+                                with _req.urlopen(req, timeout=30) as resp:
+                                    result_data = json.loads(resp.read().decode("utf-8"))
+
+                                reply_text = (
+                                    result_data
+                                    .get("candidates", [{}])[0]
+                                    .get("content", {})
+                                    .get("parts", [{}])[0]
+                                    .get("text", "No response received.")
+                                )
+
+                            except Exception as exc:
+                                reply_text = (
+                                    f"⚠ **Error communicating with Gemini API**\n\n"
+                                    f"```\n{type(exc).__name__}: {exc}\n```\n\n"
+                                    "Please check:\n"
+                                    "- Your API key is valid\n"
+                                    "- You have internet connectivity\n"
+                                    "- The model name is correct"
+                                )
+
+                        st.session_state.chat_messages.append({
+                            "role": "assistant",
+                            "content": reply_text,
+                            "time": _dt.now().strftime("%H:%M"),
+                        })
+                        st.session_state.chat_nonce += 1      # fresh, empty input box
+                        st.rerun()
 
     # ========================= REPORTS ======================
     elif page == "Reports":
